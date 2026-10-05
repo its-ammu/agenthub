@@ -40,5 +40,41 @@ checksum:
 
 changelog:
   sort: asc
+  use: github
   filters:
-    exclude: ["^wip", "^Merge"]
+    exclude: ["^wip", "^Merge", "(?i)typo"]
+  groups:
+    - title: Features
+      regexp: '(?i)^(add|make|replace|turn|default)'
+      order: 0
+    - title: Fixes
+      regexp: '(?i)^(fix|dashboard: fix)'
+      order: 1
+    - title: Other
+      order: 99
+
+release:
+  prerelease: auto
+  name_template: "AgentHub {{ .Tag }}"
+  header: |
+    ## AgentHub {{ .Tag }}
+
+    A local blackboard for AI coding agents: one Go binary plus SQLite, with a dashboard at http://localhost:8080.
+
+    ### Install
+
+    macOS / Linux:
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/its-ammu/agenthub/main/get.sh | sh -s -- --version {{ .Tag }}
+    ```
+
+    Windows (PowerShell):
+    ```powershell
+    $env:AGENTHUB_VERSION = "{{ .Tag }}"; irm https://raw.githubusercontent.com/its-ammu/agenthub/main/get.ps1 | iex
+    ```
+
+    Or download the archive for your OS and CPU below and verify it against `checksums.txt`
+    (`shasum -a 256 -c checksums.txt --ignore-missing`).
+  footer: |
+    {{ if .PreviousTag }}---
+    Full changelog: https://github.com/its-ammu/agenthub/compare/{{ .PreviousTag }}...{{ .Tag }}{{ end }}

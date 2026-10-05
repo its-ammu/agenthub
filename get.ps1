@@ -5,7 +5,7 @@
 # To pass options, download the script and run it:
 #   .\get.ps1 -Version v0.1.0 -Prefix C:\tools\agenthub -NoSkills
 param(
-  [string]$Version = "latest",
+  [string]$Version = $(if ($env:AGENTHUB_VERSION) { $env:AGENTHUB_VERSION } else { "latest" }),
   [string]$Prefix = (Join-Path $env:LOCALAPPDATA "agenthub\bin"),
   [switch]$NoSkills
 )
