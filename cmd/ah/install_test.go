@@ -106,3 +106,69 @@ func TestInstallAndUninstall(t *testing.T) {
 		t.Error("file we created should be removed when empty")
 	}
 }
+
+func TestSharedSkillInstallAndLegacyCleanup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	project := t.TempDir()
+	list, _ := tools.Load()
+	codex, _ := tools.Find(list, "codex")
+	gemini, _ := tools.Find(list, "gemini")
+
+	// A 0.2.0 install left a block next to the user's own content, and a file that was only our block.
+	codexMD := filepath.Join(home, ".codex", "AGENTS.md")
+	geminiMD := filepath.Join(home, ".gemini", "GEMINI.md")
+	os.MkdirAll(filepath.Dir(codexMD), 0755)
+	os.MkdirAll(filepath.Dir(geminiMD), 0755)
+	os.WriteFile(codexMD, []byte("# My rules\n\nbe kind\n\n"+tools.SnippetBegin+"\nold block\n"+tools.SnippetEnd+"\n"), 0644)
+	os.WriteFile(geminiMD, []byte(tools.SnippetBegin+"\nold block\n"+tools.SnippetEnd+"\n"), 0644)
+
+	path, err := installTool(codex, "/bin/ah", "http://hub", project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".agents", "skills", "blackboard", "SKILL.md"); path != want {
+		t.Errorf("shared skill path = %s, want %s", path, want)
+	}
+	if got := removeLegacy(codex, project); len(got) != 1 {
+		t.Errorf("codex legacy cleanup changed %v", got)
+	}
+	if got := removeLegacy(gemini, project); len(got) != 1 {
+		t.Errorf("gemini legacy cleanup changed %v", got)
+	}
+	data, _ := os.ReadFile(codexMD)
+	if strings.TrimSpace(string(data)) != "# My rules\n\nbe kind" {
+		t.Errorf("user content in AGENTS.md was not preserved: %q", data)
+	}
+	if _, err := os.Stat(geminiMD); !os.IsNotExist(err) {
+		t.Error("a file that held only our block should be removed")
+	}
+	// Cleaning up twice is a no-op.
+	if got := removeLegacy(codex, project); len(got) != 0 {
+		t.Errorf("second cleanup changed %v", got)
+	}
+
+	// Uninstalling one of two tools that share the file must keep it.
+	if _, ok := uninstallTool(codex, project); !ok {
+		t.Fatal("uninstallTool should remove the file when asked directly")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("shared skill still present after uninstall")
+	}
+}
+
+func TestUnknownToolIDStillGetsASession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, k := range []string{"AH_SESSION_ID", "CLAUDE_CODE_SESSION_ID"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("AH_TOOL", "opencode")
+	s, ok := detectSession()
+	if !ok || s.Tool != "opencode" || !strings.HasPrefix(s.ID, "opencode-") {
+		t.Errorf("unknown tool id: %+v, %v", s, ok)
+	}
+	t.Setenv("AH_TOOL", "Not A Tool!")
+	if _, ok := detectSession(); ok {
+		t.Error("an invalid tool id must not register a session")
+	}
+}

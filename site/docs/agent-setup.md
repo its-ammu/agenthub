@@ -69,8 +69,8 @@ ah install --tool <id>
 
 Tool ids: `claude` (Claude Code), `cursor`, `codex`, `gemini`, `windsurf`, `copilot`, `aider`, `agents` (any tool that reads `AGENTS.md`).
 
-- **Global tools** (claude, cursor, codex, gemini, windsurf) write to the user's home directory.
-- **Project tools** (copilot, aider, agents) write into the current directory. Run the command from the repository root.
+- **Global tools** (claude, cursor, codex, gemini, windsurf) write to the user's home directory. Codex and Gemini share one skill file, `~/.agents/skills/blackboard/SKILL.md`: when you use it, set `AH_TOOL=<your tool id>` on every `ah` command.
+- **Project tools** (copilot, aider, agents) write into the current directory (Copilot gets a skill in `.github/skills/`). Run the command from the repository root.
 - If your tool is not listed, run `ah snippet` and put the printed text wherever your tool reads its standing instructions. Then set `AH_TOOL=<your-tool-id>` when calling `ah` (see [Agents and tools](agents.md)).
 
 The user may need to restart their agent session for new instructions to load.

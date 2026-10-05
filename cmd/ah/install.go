@@ -75,16 +75,62 @@ func cmdInstall(args []string) {
 		fmt.Println("no supported tools found on this machine; name one with --tool (see `ah tools`)")
 		return
 	}
+	written := map[string][]string{} // shared file -> tools that use it
 	for _, t := range chosen {
+		if t.Install.Shared {
+			if names, done := written[t.Target(projectDir)]; done {
+				written[t.Target(projectDir)] = append(names, t.Name)
+				continue
+			}
+		}
 		path, err := installTool(t, ahBin, *server, projectDir)
 		if err != nil {
 			fatal("%s: %v", t.Name, err)
+		}
+		if t.Install.Shared {
+			written[path] = []string{t.Name}
+			continue
 		}
 		fmt.Printf("installed instructions for %s: %s\n", t.Name, path)
 		if t.Note != "" {
 			fmt.Printf("  note: %s\n", t.Note)
 		}
+		for _, old := range removeLegacy(t, projectDir) {
+			fmt.Printf("  removed the older %s block from %s\n", "AgentHub", old)
+		}
 	}
+	for path, names := range written {
+		fmt.Printf("installed instructions for %s: %s\n", strings.Join(names, " and "), path)
+		fmt.Println("  note: this skill file is shared; agents are told to set AH_TOOL to their own tool id")
+	}
+	for _, t := range chosen {
+		if t.Install.Shared {
+			for _, old := range removeLegacy(t, projectDir) {
+				fmt.Printf("  removed the older AgentHub block from %s\n", old)
+			}
+		}
+	}
+}
+
+// removeLegacy strips the AgentHub block from places earlier versions installed
+// to, leaving any other content. It returns the files it changed.
+func removeLegacy(t tools.Tool, projectDir string) []string {
+	var changed []string
+	for _, l := range t.Legacy {
+		path := l.LegacyTarget(projectDir)
+		data, err := os.ReadFile(path)
+		if err != nil || !tools.HasSnippet(string(data)) {
+			continue
+		}
+		rest := tools.RemoveSnippet(string(data))
+		if strings.TrimSpace(rest) == "" {
+			os.Remove(path)
+		} else {
+			os.WriteFile(path, []byte(rest), 0644)
+		}
+		changed = append(changed, path)
+	}
+	return changed
 }
 
 // installTool writes the instructions for t and returns the file it wrote.
@@ -112,9 +158,31 @@ func cmdUninstall(args []string) {
 	fs.Parse(args)
 	projectDir, _ := filepath.Abs(*dir)
 
-	chosen := pickTools(loadTools(), ids, func(t tools.Tool) bool { return t.Scope == "global" })
+	all := loadTools()
+	chosen := pickTools(all, ids, func(t tools.Tool) bool { return t.Scope == "global" })
+	inChosen := map[string]bool{}
+	for _, t := range chosen {
+		inChosen[t.ID] = true
+	}
 	removed := 0
 	for _, t := range chosen {
+		for _, old := range removeLegacy(t, projectDir) {
+			removed++
+			fmt.Printf("removed the older AgentHub block from %s\n", old)
+		}
+		// A shared file stays unless every tool that uses it is being removed.
+		if t.Install.Shared {
+			var others []string
+			for _, o := range all {
+				if o.ID != t.ID && o.Install.Shared && o.Target(projectDir) == t.Target(projectDir) && !inChosen[o.ID] {
+					others = append(others, o.ID)
+				}
+			}
+			if len(others) > 0 {
+				fmt.Printf("kept %s: it is shared with %s (uninstall them too to remove it)\n", t.Target(projectDir), strings.Join(others, ", "))
+				continue
+			}
+		}
 		path, ok := uninstallTool(t, projectDir)
 		if ok {
 			removed++

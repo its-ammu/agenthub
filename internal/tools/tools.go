@@ -28,6 +28,10 @@ var IDRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,31}$`)
 type Install struct {
 	Type string `json:"type"` // "skill" (own SKILL.md file) or "snippet" (block inside a shared file)
 	Path string `json:"path"` // ~ expands to home; relative paths are relative to the project dir
+	// Shared marks a skill file used by several tools (for example ~/.agents/skills,
+	// which Codex and Gemini CLI both read). It cannot name one tool, so the agent
+	// is told to set AH_TOOL to its own id.
+	Shared bool `json:"shared,omitempty"`
 }
 
 type Session struct {
@@ -44,6 +48,9 @@ type Tool struct {
 	Session   Session `json:"session"`
 	Usage     string  `json:"usage,omitempty"` // usage reader: "claude", "cursor" or empty for none
 	Note      string  `json:"note,omitempty"`  // shown after install
+	// Legacy lists places earlier versions installed to. Installing or
+	// uninstalling removes the AgentHub block from them (never other content).
+	Legacy []Install `json:"legacy,omitempty"`
 }
 
 type file struct {
@@ -136,6 +143,15 @@ func (t Tool) Detected() bool {
 	return err == nil && st.IsDir()
 }
 
+// LegacyTarget resolves one of the Legacy install paths.
+func (i Install) LegacyTarget(projectDir string) string {
+	p := ExpandHome(i.Path)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(projectDir, p)
+	}
+	return p
+}
+
 // Target is where the instructions for this tool are written. projectDir is
 // used for project-scoped tools and relative paths.
 func (t Tool) Target(projectDir string) string {
@@ -157,6 +173,9 @@ func ExpandHome(p string) string {
 // ahCmd is how the agent should invoke the CLI. Tools that cannot expose a
 // session id get AH_TOOL baked in so `ah` knows which tool it is serving.
 func (t Tool) ahCmd(ahBin string) string {
+	if t.Install.Shared {
+		return "AH_TOOL=<tool-id> " + ahBin
+	}
 	if t.Session.Type == "workspace" {
 		return "AH_TOOL=" + t.ID + " " + ahBin
 	}
@@ -176,8 +195,12 @@ func (t Tool) Render(ahBin, server string) (string, error) {
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, map[string]string{
-		"ToolName": t.Name, "AHCmd": t.ahCmd(ahBin), "Server": server,
+	toolName := t.Name
+	if t.Install.Shared {
+		toolName = "an AI coding agent that supports skills"
+	}
+	err = tmpl.Execute(&buf, map[string]any{
+		"ToolName": toolName, "AHCmd": t.ahCmd(ahBin), "Server": server, "Shared": t.Install.Shared,
 	})
 	if err != nil {
 		return "", err

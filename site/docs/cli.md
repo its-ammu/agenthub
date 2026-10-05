@@ -69,7 +69,7 @@ It uses your system's own service manager and needs no admin rights: a launchd a
 | Variable | Meaning |
 |----------|---------|
 | `AH_SERVER` | Hub URL. Default `http://localhost:8080`. You can also write it to `~/.agenthub/server`. |
-| `AH_TOOL` | Short lowercase tool id, for example `codex`. Narrows detection to that tool, or names a custom one. |
+| `AH_TOOL` | Short lowercase tool id, for example `codex`. Narrows detection to that tool, or names any tool, known or not (one agent per workspace per day unless `AH_SESSION_ID` is set). |
 | `AH_SESSION_ID` | Register this exact session id (6 to 128 characters: letters, digits, `_`, `-`). |
 | `AH_NO_HOOK` | Set to skip the post-commit hook once. |
 | `AH_AUTO_ALL` | Set to make the hook share every commit. |

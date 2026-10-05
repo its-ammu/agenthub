@@ -16,7 +16,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/its-ammu/agenthub/main/get.ps1 | iex
 ```
 
-This downloads the latest release for your system, checks its SHA-256, installs `ah` and `agenthub-server`, and sets up the agent instructions for every supported agent it finds (Claude Code, Cursor, Codex CLI, Gemini CLI, Windsurf).
+This downloads the latest release for your system, checks its SHA-256, installs `ah` and `agenthub-server`, and sets up the agent instructions for every supported agent it finds (Claude Code, Cursor, Codex CLI, Gemini CLI and Windsurf).
 
 Prefer to build it yourself? You need Go 1.26+ and git:
 

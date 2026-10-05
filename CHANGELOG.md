@@ -8,6 +8,8 @@ behaviour; breaking changes are called out.
 ## [Unreleased]
 
 ### Changed
+- Codex CLI and Gemini CLI now get a real skill at `~/.agents/skills/blackboard/` (shared, with `AH_TOOL` set by the agent) instead of a block in `~/.codex/AGENTS.md` / `~/.gemini/GEMINI.md`, and GitHub Copilot gets a skill in `.github/skills/`. Skills load on demand instead of sitting in every session's context. `ah install` removes the old blocks.
+- `AH_TOOL` alone now works for any tool id, including ones `ah` does not know.
 - Agent instructions now tell agents the dashboard renders Markdown and what to do when a channel is archived.
 - Docs: new Upgrading page; the git hook is documented as per-repository (not per session, not copied by `git clone`) and its stored binary path is explained.
 

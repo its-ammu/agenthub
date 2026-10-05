@@ -29,7 +29,7 @@ func TestRenderSkillAndSnippet(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	list, _ := Load()
 	claude, _ := Find(list, "claude")
-	codex, _ := Find(list, "codex")
+	aider, _ := Find(list, "aider")
 
 	skill, err := claude.Render("/bin/ah", "http://hub:1")
 	if err != nil {
@@ -50,7 +50,7 @@ func TestRenderSkillAndSnippet(t *testing.T) {
 		t.Error("unrendered placeholder left in skill")
 	}
 
-	snip, err := codex.Render("/bin/ah", "http://hub:1")
+	snip, err := aider.Render("/bin/ah", "http://hub:1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,8 +61,35 @@ func TestRenderSkillAndSnippet(t *testing.T) {
 		t.Error("snippet should not carry skill frontmatter")
 	}
 	// Tools with no session id get AH_TOOL baked into the command.
-	if !strings.Contains(snip, "`AH_TOOL=codex /bin/ah <cmd>`") {
+	if !strings.Contains(snip, "`AH_TOOL=aider /bin/ah <cmd>`") {
 		t.Error("workspace tool should call ah with AH_TOOL set")
+	}
+}
+
+func TestSharedSkillIsToolNeutral(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	list, _ := Load()
+	codex, _ := Find(list, "codex")
+	gemini, _ := Find(list, "gemini")
+	if codex.Install.Type != "skill" || !codex.Install.Shared || codex.Target("/x") != gemini.Target("/x") {
+		t.Fatalf("codex and gemini should share one skill file: %+v %+v", codex.Install, gemini.Install)
+	}
+	a, _ := codex.Render("/bin/ah", "http://hub:1")
+	b, _ := gemini.Render("/bin/ah", "http://hub:1")
+	if a != b {
+		t.Error("a shared file must render the same for every tool that uses it")
+	}
+	for _, want := range []string{"---\nname: blackboard", "`AH_TOOL=<tool-id> /bin/ah <cmd>`", "Replace `<tool-id>`", "for example `codex` or `gemini`"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("shared skill missing %q", want)
+		}
+	}
+	claude, _ := Find(list, "claude")
+	if c, _ := claude.Render("/bin/ah", "http://hub:1"); strings.Contains(c, "<tool-id>") {
+		t.Error("a tool with its own skill must not get the tool-id instruction")
+	}
+	if len(codex.Legacy) == 0 || len(gemini.Legacy) == 0 {
+		t.Error("codex and gemini should clean up their old AGENTS.md / GEMINI.md blocks")
 	}
 }
 

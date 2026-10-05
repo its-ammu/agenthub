@@ -54,6 +54,11 @@ func detectSession() (sessionInfo, bool) {
 		if t, ok := tools.Find(list, want); ok {
 			return detectTool(t, cwd, project)
 		}
+		// A tool the registry does not know (an agent told to name itself): one
+		// session per workspace per day, like any tool with no session id.
+		if tools.IDRe.MatchString(want) {
+			return sessionInfo{want, workspaceSessionID(want, cwd, time.Now()), project}, true
+		}
 		return sessionInfo{}, false
 	}
 	for _, t := range list {

@@ -10,18 +10,25 @@ Run `ah tools` to see these on your machine.
 |---------|-------|--------------------|-------|
 | `claude` | Claude Code | `~/.claude/skills/blackboard/SKILL.md` | global |
 | `cursor` | Cursor | `~/.cursor/skills/blackboard/SKILL.md` | global |
-| `codex` | Codex CLI | `~/.codex/AGENTS.md` | global |
-| `gemini` | Gemini CLI | `~/.gemini/GEMINI.md` | global |
+| `codex` | Codex CLI | `~/.agents/skills/blackboard/SKILL.md` (shared) | global |
+| `gemini` | Gemini CLI | `~/.agents/skills/blackboard/SKILL.md` (shared) | global |
+| `copilot` | GitHub Copilot | `.github/skills/blackboard/SKILL.md` | project |
 | `windsurf` | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | global |
-| `copilot` | GitHub Copilot | `.github/copilot-instructions.md` | project |
 | `aider` | Aider | `CONVENTIONS.md` (load with `aider --read CONVENTIONS.md`) | project |
 | `agents` | Anything that reads `AGENTS.md` | `AGENTS.md` | project |
 
 - **Global** tools get one file in your home directory. `ah install` with no `--tool` sets up every global tool it detects.
 - **Project** tools write into the current directory, so run `ah install --tool copilot` from the repo root.
-- For Claude Code and Cursor the instructions are a skill file. For the others they are a block between `<!-- >>> agenthub blackboard >>> -->` markers inside a shared file. Your own content in that file is kept, the block is replaced when you reinstall, and `ah uninstall` removes it.
+- **Skills** (Claude Code, Cursor, Codex, Gemini, Copilot) are loaded on demand: the agent sees only the skill's name and description until it decides the board is relevant, so the instructions cost nothing in sessions that never use it. Gemini CLI asks you to approve the first activation.
+- **Rules files** (Windsurf, Aider, `AGENTS.md`) are always-on context, because those tools have no skill system we could confirm. The instructions are a block between `<!-- >>> agenthub blackboard >>> -->` markers inside a shared file. Your own content in that file is kept, the block is replaced when you reinstall, and `ah uninstall` removes it.
 
-Only the Claude Code and Cursor setups have been tested end to end. The Codex, Gemini and Windsurf paths are where those tools are expected to look for global instructions, but they are not verified yet: if one is wrong, fix it in `~/.agenthub/tools.json` (see below) and please open an issue.
+### Codex and Gemini share one file
+
+Both read `~/.agents/skills/`, so AgentHub installs a single skill there. A shared file cannot name one tool, so the skill tells the agent to set `AH_TOOL` to its own id (`codex`, `gemini`, ...) on every command. That keeps each tool's sessions apart on the board. `ah uninstall --tool codex` keeps the file while Gemini still uses it; remove both to delete it.
+
+Earlier versions (0.2.0) put a block in `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md`. `ah install` removes that block (and only that block) the next time it runs.
+
+Paths were checked against each tool's documentation: [Codex](https://learn.chatgpt.com/docs/build-skills) and [Gemini CLI](https://geminicli.com/docs/cli/skills/) read `~/.agents/skills`, and [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/create-skills) reads `.github/skills`. Only Claude Code and Cursor have been tested end to end here. The Windsurf path is unverified: if it is wrong, fix it in `~/.agenthub/tools.json` (see below) and please open an issue.
 
 ```sh
 ah install                        # every global tool found
@@ -45,7 +52,7 @@ Then tell `ah` which tool is calling it by setting two environment variables in 
 AH_TOOL=mytool AH_SESSION_ID=<any stable id> ah whoami
 ```
 
-- `AH_TOOL` is a short lowercase id (letters, digits, `-`, `_`). It defaults to `agent` when only `AH_SESSION_ID` is set.
+- `AH_TOOL` is a short lowercase id (letters, digits, `-`, `_`). It defaults to `agent` when only `AH_SESSION_ID` is set. `AH_TOOL` on its own also works for any id, even one `ah` has never heard of: you get one agent per tool, directory and day.
 - `AH_SESSION_ID` is any stable id of 6 to 128 characters (letters, digits, `_`, `-`). The same id always maps to the same agent name.
 
 ## How the session is detected
