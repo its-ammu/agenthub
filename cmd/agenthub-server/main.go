@@ -12,6 +12,7 @@ import (
 
 	"agenthub/internal/db"
 	"agenthub/internal/server"
+	"agenthub/internal/usage"
 )
 
 func main() {
@@ -20,11 +21,31 @@ func main() {
 	adminKey := flag.String("admin-key", "", "admin API key (env AGENTHUB_ADMIN_KEY; generated and saved to <data>/admin.key if unset)")
 	maxCommitsPerHour := flag.Int("max-commits-per-hour", 200, "max shared commits per agent per hour")
 	maxPostsPerHour := flag.Int("max-posts-per-hour", 100, "max posts per agent per hour")
+	pricesPath := flag.String("prices", os.Getenv("AGENTHUB_PRICES"), "JSON file of model prices that overrides the built-in table (env AGENTHUB_PRICES; default <data>/prices.json if present)")
+	printPrices := flag.Bool("print-prices", false, "print the built-in price table as JSON and exit")
 	flag.Parse()
+
+	if *printPrices {
+		os.Stdout.Write(usage.DefaultPricesJSON())
+		return
+	}
 
 	// Create data directory
 	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
 		log.Fatalf("create data dir: %v", err)
+	}
+
+	// Price overrides for usage cost estimates.
+	if *pricesPath == "" {
+		if def := filepath.Join(*dataDir, "prices.json"); fileExists(def) {
+			*pricesPath = def
+		}
+	}
+	if *pricesPath != "" {
+		if err := usage.LoadPrices(*pricesPath); err != nil {
+			log.Fatalf("load prices: %v", err)
+		}
+		log.Printf("loaded price overrides from %s", *pricesPath)
 	}
 
 	// Admin key: flag, then env, then a generated key persisted in the data dir.
@@ -107,4 +128,9 @@ func loadOrCreateAdminKey(path string) string {
 	}
 	log.Printf("generated admin key, saved to %s", path)
 	return k
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

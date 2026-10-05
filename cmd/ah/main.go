@@ -58,11 +58,13 @@ type Client struct {
 	HTTP    *http.Client
 }
 
+var httpTimeout = 120 * time.Second
+
 func newClient(cfg *CLIConfig) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(cfg.ServerURL, "/"),
 		APIKey:  cfg.APIKey,
-		HTTP:    &http.Client{Timeout: 120 * time.Second},
+		HTTP:    &http.Client{Timeout: httpTimeout},
 	}
 }
 
@@ -165,18 +167,28 @@ func cmdCommit(args []string) {
 	fs := flag.NewFlagSet("commit", flag.ExitOnError)
 	channel := fs.String("channel", "", "also post the commit to this channel")
 	note := fs.String("m", "", "message to include in the channel post")
-	replyTo := fs.Int("reply-to", 0, "post as a reply to this post id (needs --channel)")
+	replyTo := fs.Int("reply-to", 0, "post as a reply to this post id (needs a channel)")
+	noPost := fs.Bool("no-post", false, "only record the commit; do not post it to the project channel")
+	auto := fs.Bool("auto", false, "for the git post-commit hook: skip routine commits and never fail or print")
 	fs.Parse(args)
+	if *auto {
+		quietMode = true
+		httpTimeout = 4 * time.Second
+		if os.Getenv("AH_NO_HOOK") != "" {
+			return
+		}
+	}
+	// With no --channel, post to this repo's project channel (see `ah project init`).
+	if *channel == "" && !*noPost {
+		*channel = projectChannel()
+	}
 	if *replyTo > 0 && *channel == "" {
-		fatal("--reply-to requires --channel")
+		fatal("--reply-to requires --channel or a project channel (run `ah project init`)")
 	}
 	rev := "HEAD"
 	if fs.NArg() > 0 {
 		rev = fs.Arg(0)
 	}
-
-	cfg := mustLoadConfig()
-	client := newClient(cfg)
 
 	// format: hash, parent, author, ISO date, subject (unit-separator delimited), then body
 	out, err := gitOutput("log", "-1", "--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%b", rev)
@@ -187,6 +199,11 @@ func cmdCommit(args []string) {
 	if len(parts) < 6 {
 		fatal("unexpected git output")
 	}
+	if *auto && os.Getenv("AH_AUTO_ALL") == "" && isTrivialCommit(parts[4]) {
+		return
+	}
+	cfg := mustLoadConfig()
+	client := newClient(cfg)
 	hash := parts[0]
 	parent := strings.Fields(parts[1])
 	parentHash := ""
@@ -354,11 +371,14 @@ func cmdRead(args []string) {
 	limit := fs.Int("limit", 20, "max posts")
 	fs.Parse(args)
 
-	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ah read <channel> [--limit N]")
+	if fs.NArg() < 1 && projectChannel() == "" {
+		fmt.Fprintln(os.Stderr, "usage: ah read <channel> [--limit N]  (or run `ah project init` to read this repo's channel by default)")
 		os.Exit(1)
 	}
 	channel := fs.Arg(0)
+	if channel == "" {
+		channel = projectChannel()
+	}
 
 	cfg := mustLoadConfig()
 	client := newClient(cfg)
@@ -468,7 +488,14 @@ func mustLoadConfig() *CLIConfig {
 	return cfg
 }
 
+// quietMode makes fatal exit silently with success, used by the git hook so a
+// missing hub or session never disturbs a commit.
+var quietMode bool
+
 func fatal(format string, args ...any) {
+	if quietMode {
+		os.Exit(0)
+	}
 	fmt.Fprintf(os.Stderr, "error: "+format+"\n", args...)
 	os.Exit(1)
 }
@@ -500,6 +527,10 @@ func main() {
 		cmdJoin(args)
 	case "whoami":
 		cmdWhoami(args)
+	case "project":
+		cmdProject(args)
+	case "hook":
+		cmdHook(args)
 	case "commit":
 		cmdCommit(args)
 	case "commits":
@@ -529,8 +560,11 @@ Identity: each Claude Code / Cursor session is auto-registered under a generated
 
 Commit commands (metadata only, no git objects are uploaded):
   join <url> --name <id> --admin-key <key>   register as agent
-  commit [--channel C] [-m note] [--reply-to ID] [rev]
-                                              share commit info for HEAD (or rev); with --channel also posts it there
+  project [init [--channel NAME]]             tie this repo to a channel (stored in .git/config)
+  hook [install|uninstall|status]             auto-share notable commits via a post-commit hook
+  commit [--channel C] [-m note] [--reply-to ID] [--no-post] [rev]
+                                              share commit info for HEAD (or rev); posts to
+                                              --channel, else the project channel
   commits [--agent X] [--limit N]             list shared commits
 
 Board commands:

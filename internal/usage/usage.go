@@ -4,10 +4,12 @@ package usage
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 type ModelUsage struct {
@@ -19,6 +21,14 @@ type ModelUsage struct {
 	CacheWrite1h int64   `json:"cache_write_1h_tokens"`
 	Cost         float64 `json:"cost_usd"`
 	Priced       bool    `json:"priced"`
+	FastTurns    int     `json:"fast_turns,omitempty"`
+}
+
+// Bucket is cost over one slice of the session timeline.
+type Bucket struct {
+	Start string  `json:"start"`
+	Cost  float64 `json:"cost_usd"`
+	Turns int     `json:"turns"`
 }
 
 type Report struct {
@@ -29,43 +39,16 @@ type Report struct {
 	LastAt    string       `json:"last_at,omitempty"`
 	Models    []ModelUsage `json:"models,omitempty"`
 	TotalCost float64      `json:"total_cost_usd"`
-	CostKnown bool         `json:"cost_known"` // false when no cost could be computed
-	EstTokens int64        `json:"estimated_tokens,omitempty"`
-	Notes     []string     `json:"notes,omitempty"`
-}
-
-// price is USD per million tokens. Cache writes are 1.25x (5m) and 2x (1h) of input.
-type price struct{ in, out, cacheRead float64 }
-
-// Anthropic first-party API list prices. Estimates only: they ignore batch,
-// fast-mode and plan discounts, so a subscription user's real spend differs.
-var prices = map[string]price{
-	"claude-fable-5-1":  {10, 50, 0.25},
-	"claude-mythos-5-1": {10, 50, 0.25},
-	"claude-fable-5":    {10, 50, 1},
-	"claude-mythos-5":   {10, 50, 1},
-	"claude-opus-5-5":   {4, 20, 0.20},
-	"claude-opus-5":     {5, 25, 0.50},
-	"claude-opus-4-8":   {5, 25, 0.50},
-	"claude-opus-4-7":   {5, 25, 0.50},
-	"claude-opus-4-6":   {5, 25, 0.50},
-	"claude-opus-4-5":   {5, 25, 0.50},
-	"claude-sonnet-5-5": {2, 10, 0.20},
-	"claude-sonnet-5":   {2, 10, 0.20},
-	"claude-sonnet-4-6": {3, 15, 0.30},
-	"claude-sonnet-4-5": {3, 15, 0.30},
-	"claude-sonnet-4":   {3, 15, 0.30},
-	"claude-haiku-4-5":  {1, 5, 0.10},
-}
-
-func lookup(model string) (price, bool) {
-	best, found := "", false
-	for k := range prices {
-		if strings.HasPrefix(model, k) && len(k) > len(best) {
-			best, found = k, true
-		}
-	}
-	return prices[best], found
+	// Breakdown of TotalCost by where the turns ran.
+	MainCost      float64  `json:"main_cost_usd,omitempty"`
+	SubagentCost  float64  `json:"subagent_cost_usd,omitempty"`
+	SubagentTurns int      `json:"subagent_turns,omitempty"`
+	FastTurns     int      `json:"fast_turns,omitempty"`
+	BucketMinutes int      `json:"bucket_minutes,omitempty"`
+	Timeline      []Bucket `json:"timeline,omitempty"`
+	CostKnown     bool     `json:"cost_known"` // false when no cost could be computed
+	EstTokens     int64    `json:"estimated_tokens,omitempty"`
+	Notes         []string `json:"notes,omitempty"`
 }
 
 type claudeLine struct {
@@ -74,10 +57,11 @@ type claudeLine struct {
 		ID    string `json:"id"`
 		Model string `json:"model"`
 		Usage *struct {
-			Input         int64 `json:"input_tokens"`
-			Output        int64 `json:"output_tokens"`
-			CacheRead     int64 `json:"cache_read_input_tokens"`
-			CacheCreation int64 `json:"cache_creation_input_tokens"`
+			Speed         string `json:"speed"`
+			Input         int64  `json:"input_tokens"`
+			Output        int64  `json:"output_tokens"`
+			CacheRead     int64  `json:"cache_read_input_tokens"`
+			CacheCreation int64  `json:"cache_creation_input_tokens"`
 			CacheDetail   *struct {
 				W5m int64 `json:"ephemeral_5m_input_tokens"`
 				W1h int64 `json:"ephemeral_1h_input_tokens"`
@@ -91,6 +75,15 @@ func home() string {
 	return h
 }
 
+// turn is one deduplicated assistant message with its token usage.
+type turn struct {
+	model string
+	u     ModelUsage
+	at    string
+	fast  bool
+	sub   bool // ran in a subagent transcript
+}
+
 // Claude reads a Claude Code session transcript (and its subagent transcripts).
 func Claude(sessionID string) Report {
 	r := Report{Tool: "claude"}
@@ -98,27 +91,24 @@ func Claude(sessionID string) Report {
 		return r
 	}
 	root := filepath.Join(home(), ".claude", "projects")
-	files, _ := filepath.Glob(filepath.Join(root, "*", sessionID+".jsonl"))
-	if len(files) == 0 {
+	mains, _ := filepath.Glob(filepath.Join(root, "*", sessionID+".jsonl"))
+	if len(mains) == 0 {
 		r.Notes = append(r.Notes, "No Claude Code transcript found for this session on this machine.")
 		return r
 	}
-	sub, _ := filepath.Glob(filepath.Join(root, "*", sessionID, "subagents", "*.jsonl"))
-	files = append(files, sub...)
+	subs, _ := filepath.Glob(filepath.Join(root, "*", sessionID, "subagents", "*.jsonl"))
 	r.Found = true
 
 	// Streaming writes the same message several times; keep the last usage per id.
-	type entry struct {
-		model string
-		u     ModelUsage
-	}
-	byID := map[string]entry{}
-	var anon []entry
-	for _, f := range files {
-		fh, err := os.Open(f)
+	// Ids are scoped per file so a main and a subagent transcript never collide.
+	var turns []turn
+	read := func(path string, sub bool) {
+		fh, err := os.Open(path)
 		if err != nil {
-			continue
+			return
 		}
+		defer fh.Close()
+		byID := map[string]int{}
 		sc := bufio.NewScanner(fh)
 		sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
 		for sc.Scan() {
@@ -144,52 +134,123 @@ func Claude(sessionID string) Report {
 			} else {
 				mu.CacheWrite5m = u.CacheCreation
 			}
-			e := entry{l.Message.Model, mu}
-			if l.Message.ID != "" {
-				byID[l.Message.ID] = e
-			} else {
-				anon = append(anon, e)
+			t := turn{model: l.Message.Model, u: mu, at: l.Timestamp, fast: u.Speed == "fast", sub: sub}
+			if id := l.Message.ID; id != "" {
+				if i, ok := byID[id]; ok {
+					turns[i] = t
+					continue
+				}
+				byID[id] = len(turns)
 			}
+			turns = append(turns, t)
 		}
-		fh.Close()
+	}
+	for _, f := range mains {
+		read(f, false)
+	}
+	for _, f := range subs {
+		read(f, true)
 	}
 
 	agg := map[string]*ModelUsage{}
-	add := func(e entry) {
+	unpriced := map[string]bool{}
+	var priced []turn
+	costs := []float64{}
+	for _, t := range turns {
 		r.Turns++
-		m := agg[e.model]
+		m := agg[t.model]
 		if m == nil {
-			m = &ModelUsage{Model: e.model}
-			agg[e.model] = m
+			m = &ModelUsage{Model: t.model}
+			agg[t.model] = m
 		}
-		m.Input += e.u.Input
-		m.Output += e.u.Output
-		m.CacheRead += e.u.CacheRead
-		m.CacheWrite5m += e.u.CacheWrite5m
-		m.CacheWrite1h += e.u.CacheWrite1h
-	}
-	for _, e := range byID {
-		add(e)
-	}
-	for _, e := range anon {
-		add(e)
-	}
-
-	for _, m := range agg {
-		if p, ok := lookup(m.Model); ok {
-			m.Priced = true
-			m.Cost = (float64(m.Input)*p.in + float64(m.Output)*p.out + float64(m.CacheRead)*p.cacheRead +
-				float64(m.CacheWrite5m)*p.in*1.25 + float64(m.CacheWrite1h)*p.in*2) / 1e6
-			r.TotalCost += m.Cost
-			r.CostKnown = true
+		m.Input += t.u.Input
+		m.Output += t.u.Output
+		m.CacheRead += t.u.CacheRead
+		m.CacheWrite5m += t.u.CacheWrite5m
+		m.CacheWrite1h += t.u.CacheWrite1h
+		if t.fast {
+			m.FastTurns++
+			r.FastTurns++
+		}
+		if t.sub {
+			r.SubagentTurns++
+		}
+		p, ok := lookup(t.model)
+		if !ok {
+			unpriced[t.model] = true
+			continue
+		}
+		m.Priced = true
+		c := p.cost(t.u.Input, t.u.Output, t.u.CacheRead, t.u.CacheWrite5m, t.u.CacheWrite1h, t.fast)
+		m.Cost += c
+		r.TotalCost += c
+		r.CostKnown = true
+		if t.sub {
+			r.SubagentCost += c
 		} else {
-			r.Notes = append(r.Notes, "No list price known for "+m.Model+"; it is excluded from the cost total.")
+			r.MainCost += c
 		}
+		priced = append(priced, t)
+		costs = append(costs, c)
+	}
+	for model := range unpriced {
+		r.Notes = append(r.Notes, "No price known for "+model+"; it is excluded from the cost total. Add it with --prices.")
+	}
+	for _, m := range agg {
 		r.Models = append(r.Models, *m)
 	}
 	sort.Slice(r.Models, func(i, j int) bool { return r.Models[i].Cost > r.Models[j].Cost })
+
+	r.Timeline, r.BucketMinutes = buildTimeline(priced, costs)
+
 	r.Notes = append(r.Notes, "Cost is an estimate at Anthropic API list prices. Subscription plans bill differently.")
+	if r.FastTurns > 0 {
+		r.Notes = append(r.Notes, fmt.Sprintf("%d turns ran in fast mode and are priced with the model's fast multiplier where one is configured.", r.FastTurns))
+	}
 	return r
+}
+
+var bucketSizes = []int{1, 5, 10, 15, 30, 60, 120, 360, 720, 1440} // minutes
+
+// buildTimeline sums turn costs into at most ~40 equal time buckets.
+func buildTimeline(turns []turn, costs []float64) ([]Bucket, int) {
+	type pt struct {
+		t time.Time
+		c float64
+	}
+	var pts []pt
+	for i, t := range turns {
+		ts, err := time.Parse(time.RFC3339Nano, t.at)
+		if err != nil {
+			continue
+		}
+		pts = append(pts, pt{ts, costs[i]})
+	}
+	if len(pts) == 0 {
+		return nil, 0
+	}
+	sort.Slice(pts, func(i, j int) bool { return pts[i].t.Before(pts[j].t) })
+	span := pts[len(pts)-1].t.Sub(pts[0].t)
+	size := bucketSizes[len(bucketSizes)-1]
+	for _, m := range bucketSizes {
+		if span <= time.Duration(m)*time.Minute*40 {
+			size = m
+			break
+		}
+	}
+	step := time.Duration(size) * time.Minute
+	start := pts[0].t.Truncate(step)
+	n := int(pts[len(pts)-1].t.Sub(start)/step) + 1
+	out := make([]Bucket, n)
+	for i := range out {
+		out[i].Start = start.Add(time.Duration(i) * step).UTC().Format(time.RFC3339)
+	}
+	for _, p := range pts {
+		i := int(p.t.Sub(start) / step)
+		out[i].Cost += p.c
+		out[i].Turns++
+	}
+	return out, size
 }
 
 type cursorLine struct {
