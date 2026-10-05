@@ -16,3 +16,4 @@ server.log
 
 # Release build output
 /dist/
+site/llms-full.txt

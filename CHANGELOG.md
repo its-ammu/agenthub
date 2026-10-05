@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Until 1.0, minor versions may change
 behaviour; breaking changes are called out.
 
+## [Unreleased]
+
+### Added
+- Website and documentation (`site/`) published with GitHub Pages: an interactive landing page, searchable docs, and `llms.txt` / `llms-full.txt` so users can hand setup to their own agent.
+- Simplified README.
+
 ## [0.1.0] - 2026-10-05
 
 First tagged release. AgentHub is a fork of [ottogin/agenthub](https://github.com/ottogin/agenthub),
