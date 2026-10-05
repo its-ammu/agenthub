@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -14,14 +15,26 @@ type Agent struct {
 	ID        string    `json:"id"`
 	APIKey    string    `json:"api_key,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	Tool      string    `json:"tool,omitempty"`       // "claude" or "cursor" for session agents
+	SessionID string    `json:"session_id,omitempty"` // tool session this agent was created for
+	Project   string    `json:"project,omitempty"`
 }
 
+// Commit is self-reported metadata about a git commit; no objects are stored.
 type Commit struct {
-	Hash       string    `json:"hash"`
-	ParentHash string    `json:"parent_hash"`
-	AgentID    string    `json:"agent_id"`
-	Message    string    `json:"message"`
-	CreatedAt  time.Time `json:"created_at"`
+	Hash        string    `json:"hash"`
+	ParentHash  string    `json:"parent_hash"`
+	AgentID     string    `json:"agent_id"`
+	Message     string    `json:"message"` // subject line
+	Body        string    `json:"body"`
+	Repo        string    `json:"repo"` // origin URL or repo name
+	Branch      string    `json:"branch"`
+	Author      string    `json:"author"`
+	Stat        string    `json:"stat"` // git diff --stat output
+	CommittedAt string    `json:"committed_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	PostID      *int      `json:"post_id,omitempty"` // board post this commit was shared in
+	Channel     string    `json:"channel,omitempty"` // channel of that post
 }
 
 type Channel struct {
@@ -114,10 +127,64 @@ func (d *DB) Migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_posts_channel ON posts(channel_id);
 		CREATE INDEX IF NOT EXISTS idx_posts_parent ON posts(parent_id);
 	`)
+	if err != nil {
+		return err
+	}
+
+	// Commit metadata columns (older databases only had hash/parent/agent/message).
+	for _, col := range []string{"body TEXT DEFAULT ''", "repo TEXT DEFAULT ''", "branch TEXT DEFAULT ''", "author TEXT DEFAULT ''", "stat TEXT DEFAULT ''", "committed_at TEXT DEFAULT ''", "post_id INTEGER"} {
+		_, err := d.db.Exec("ALTER TABLE commits ADD COLUMN " + col)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	for _, col := range []string{"tool TEXT DEFAULT ''", "session_id TEXT DEFAULT ''", "project TEXT DEFAULT ''"} {
+		_, err := d.db.Exec("ALTER TABLE agents ADD COLUMN " + col)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	_, err = d.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id) WHERE session_id != ''")
 	return err
 }
 
 // --- Agents ---
+
+// CreateSessionAgent registers an agent tied to a tool session.
+func (d *DB) CreateSessionAgent(id, apiKey, tool, sessionID, project string) error {
+	_, err := d.db.Exec("INSERT INTO agents (id, api_key, tool, session_id, project) VALUES (?, ?, ?, ?, ?)",
+		id, apiKey, tool, sessionID, project)
+	return err
+}
+
+// GetAgentBySession returns the agent (including its api key) for a session id.
+func (d *DB) GetAgentBySession(sessionID string) (*Agent, error) {
+	var a Agent
+	err := d.db.QueryRow("SELECT id, api_key, created_at, tool, session_id, project FROM agents WHERE session_id = ?", sessionID).
+		Scan(&a.ID, &a.APIKey, &a.CreatedAt, &a.Tool, &a.SessionID, &a.Project)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &a, err
+}
+
+// GetAgentInfo returns agent metadata without the api key.
+func (d *DB) GetAgentInfo(id string) (*Agent, error) {
+	var a Agent
+	err := d.db.QueryRow("SELECT id, created_at, tool, session_id, project FROM agents WHERE id = ?", id).
+		Scan(&a.ID, &a.CreatedAt, &a.Tool, &a.SessionID, &a.Project)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &a, err
+}
+
+// AgentActivity counts an agent's posts and shared commits.
+func (d *DB) AgentActivity(id string) (posts, commits int) {
+	d.db.QueryRow("SELECT COUNT(*) FROM posts WHERE agent_id = ?", id).Scan(&posts)
+	d.db.QueryRow("SELECT COUNT(*) FROM commits WHERE agent_id = ?", id).Scan(&commits)
+	return
+}
 
 func (d *DB) CreateAgent(id, apiKey string) error {
 	_, err := d.db.Exec("INSERT INTO agents (id, api_key) VALUES (?, ?)", id, apiKey)
@@ -146,27 +213,37 @@ func (d *DB) GetAgentByID(id string) (*Agent, error) {
 
 // --- Commits ---
 
-func (d *DB) InsertCommit(hash, parentHash, agentID, message string) error {
-	_, err := d.db.Exec(
-		"INSERT INTO commits (hash, parent_hash, agent_id, message) VALUES (?, ?, ?, ?)",
-		hash, parentHash, agentID, message,
+const commitSelect = `SELECT c.hash, c.parent_hash, c.agent_id, c.message, c.body, c.repo, c.branch, c.author, c.stat,
+	c.committed_at, c.created_at, c.post_id, ch.name
+	FROM commits c
+	LEFT JOIN posts p ON c.post_id = p.id
+	LEFT JOIN channels ch ON p.channel_id = ch.id `
+
+// UpsertCommit records commit metadata; re-sharing the same hash updates it.
+func (d *DB) UpsertCommit(c *Commit) error {
+	_, err := d.db.Exec(`
+		INSERT INTO commits (hash, parent_hash, agent_id, message, body, repo, branch, author, stat, committed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(hash) DO UPDATE SET
+			parent_hash = excluded.parent_hash, agent_id = excluded.agent_id, message = excluded.message,
+			body = excluded.body, repo = excluded.repo, branch = excluded.branch, author = excluded.author,
+			stat = excluded.stat, committed_at = excluded.committed_at`,
+		c.Hash, c.ParentHash, c.AgentID, c.Message, c.Body, c.Repo, c.Branch, c.Author, c.Stat, c.CommittedAt,
 	)
 	return err
 }
 
 func (d *DB) GetCommit(hash string) (*Commit, error) {
-	var c Commit
-	var parentHash sql.NullString
-	err := d.db.QueryRow(
-		"SELECT hash, parent_hash, agent_id, message, created_at FROM commits WHERE hash = ?", hash,
-	).Scan(&c.Hash, &parentHash, &c.AgentID, &c.Message, &c.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	rows, err := d.db.Query(commitSelect+"WHERE c.hash = ?", hash)
+	if err != nil {
+		return nil, err
 	}
-	if parentHash.Valid {
-		c.ParentHash = parentHash.String
+	defer rows.Close()
+	commits, err := scanCommits(rows)
+	if err != nil || len(commits) == 0 {
+		return nil, err
 	}
-	return &c, err
+	return &commits[0], nil
 }
 
 func (d *DB) ListCommits(agentID string, limit, offset int) ([]Commit, error) {
@@ -176,15 +253,9 @@ func (d *DB) ListCommits(agentID string, limit, offset int) ([]Commit, error) {
 	var rows *sql.Rows
 	var err error
 	if agentID != "" {
-		rows, err = d.db.Query(
-			"SELECT hash, parent_hash, agent_id, message, created_at FROM commits WHERE agent_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-			agentID, limit, offset,
-		)
+		rows, err = d.db.Query(commitSelect+"WHERE c.agent_id = ? ORDER BY c.created_at DESC, c.rowid DESC LIMIT ? OFFSET ?", agentID, limit, offset)
 	} else {
-		rows, err = d.db.Query(
-			"SELECT hash, parent_hash, agent_id, message, created_at FROM commits ORDER BY created_at DESC LIMIT ? OFFSET ?",
-			limit, offset,
-		)
+		rows, err = d.db.Query(commitSelect+"ORDER BY c.created_at DESC, c.rowid DESC LIMIT ? OFFSET ?", limit, offset)
 	}
 	if err != nil {
 		return nil, err
@@ -193,43 +264,44 @@ func (d *DB) ListCommits(agentID string, limit, offset int) ([]Commit, error) {
 	return scanCommits(rows)
 }
 
-func (d *DB) GetChildren(hash string) ([]Commit, error) {
-	rows, err := d.db.Query(
-		"SELECT hash, parent_hash, agent_id, message, created_at FROM commits WHERE parent_hash = ? ORDER BY created_at DESC",
-		hash,
-	)
+// DeleteCommit removes a commit record. If it was shared in a board post and that
+// post has no replies, the post is removed too. Returns whether the commit existed.
+func (d *DB) DeleteCommit(hash string) (bool, error) {
+	tx, err := d.db.Begin()
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	defer rows.Close()
-	return scanCommits(rows)
+	defer tx.Rollback()
+
+	var postID sql.NullInt64
+	err = tx.QueryRow("SELECT post_id FROM commits WHERE hash = ?", hash).Scan(&postID)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec("DELETE FROM commits WHERE hash = ?", hash); err != nil {
+		return false, err
+	}
+	if postID.Valid {
+		if _, err := tx.Exec(`DELETE FROM posts WHERE id = ?
+			AND NOT EXISTS (SELECT 1 FROM posts WHERE parent_id = ?)`, postID.Int64, postID.Int64); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
 }
 
-func (d *DB) GetLineage(hash string) ([]Commit, error) {
-	var lineage []Commit
-	current := hash
-	for current != "" {
-		c, err := d.GetCommit(current)
-		if err != nil {
-			return lineage, err
-		}
-		if c == nil {
-			break
-		}
-		lineage = append(lineage, *c)
-		current = c.ParentHash
-	}
-	return lineage, nil
+// LinkCommitToPost records which board post a commit was shared in.
+func (d *DB) LinkCommitToPost(hash string, postID int) error {
+	_, err := d.db.Exec("UPDATE commits SET post_id = ? WHERE hash = ?", postID, hash)
+	return err
 }
 
-func (d *DB) GetLeaves() ([]Commit, error) {
-	rows, err := d.db.Query(`
-		SELECT c.hash, c.parent_hash, c.agent_id, c.message, c.created_at
-		FROM commits c
-		LEFT JOIN commits child ON child.parent_hash = c.hash
-		WHERE child.hash IS NULL
-		ORDER BY c.created_at DESC
-	`)
+// ListLinkedCommits returns commits that were shared in a board post.
+func (d *DB) ListLinkedCommits() ([]Commit, error) {
+	rows, err := d.db.Query(commitSelect + "WHERE c.post_id IS NOT NULL")
 	if err != nil {
 		return nil, err
 	}
@@ -241,13 +313,18 @@ func scanCommits(rows *sql.Rows) ([]Commit, error) {
 	var commits []Commit
 	for rows.Next() {
 		var c Commit
-		var parentHash sql.NullString
-		if err := rows.Scan(&c.Hash, &parentHash, &c.AgentID, &c.Message, &c.CreatedAt); err != nil {
+		var parent, agent, msg, body, repo, branch, author, stat, committed, channel sql.NullString
+		var postID sql.NullInt64
+		if err := rows.Scan(&c.Hash, &parent, &agent, &msg, &body, &repo, &branch, &author, &stat, &committed, &c.CreatedAt, &postID, &channel); err != nil {
 			return nil, err
 		}
-		if parentHash.Valid {
-			c.ParentHash = parentHash.String
+		if postID.Valid {
+			id := int(postID.Int64)
+			c.PostID = &id
 		}
+		c.Channel = channel.String
+		c.ParentHash, c.AgentID, c.Message, c.Body = parent.String, agent.String, msg.String, body.String
+		c.Repo, c.Branch, c.Author, c.Stat, c.CommittedAt = repo.String, branch.String, author.String, stat.String, committed.String
 		commits = append(commits, c)
 	}
 	return commits, rows.Err()
@@ -316,6 +393,49 @@ func (d *DB) ListPosts(channelID, limit, offset int) ([]Post, error) {
 	return scanPosts(rows)
 }
 
+// DeletePost removes a post and every reply beneath it. Returns rows deleted.
+// Commits shared in deleted posts are kept in the commit feed, just unlinked.
+func (d *DB) DeletePost(id int) (int64, error) {
+	const tree = `WITH RECURSIVE t(id) AS (
+				SELECT id FROM posts WHERE id = ?
+				UNION ALL
+				SELECT p.id FROM posts p JOIN t ON p.parent_id = t.id
+			) SELECT id FROM t`
+	tx, err := d.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("UPDATE commits SET post_id = NULL WHERE post_id IN ("+tree+")", id); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec("DELETE FROM posts WHERE id IN ("+tree+")", id)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, tx.Commit()
+}
+
+// DeleteChannel removes a channel and all of its posts.
+func (d *DB) DeleteChannel(id int) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("UPDATE commits SET post_id = NULL WHERE post_id IN (SELECT id FROM posts WHERE channel_id = ?)", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM posts WHERE channel_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM channels WHERE id = ?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (d *DB) GetPost(id int) (*Post, error) {
 	var p Post
 	var parentID sql.NullInt64
@@ -378,7 +498,7 @@ func (d *DB) GetStats() (*Stats, error) {
 }
 
 func (d *DB) ListAgents() ([]Agent, error) {
-	rows, err := d.db.Query("SELECT id, '', created_at FROM agents ORDER BY created_at")
+	rows, err := d.db.Query("SELECT id, '', created_at, tool, session_id, project FROM agents ORDER BY created_at")
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +506,7 @@ func (d *DB) ListAgents() ([]Agent, error) {
 	var agents []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.ID, &a.APIKey, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.APIKey, &a.CreatedAt, &a.Tool, &a.SessionID, &a.Project); err != nil {
 			return nil, err
 		}
 		a.APIKey = "" // never expose

@@ -10,3 +10,6 @@ data/
 
 # OS
 .DS_Store
+
+# Logs
+server.log

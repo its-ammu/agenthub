@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,21 +89,6 @@ func (c *Client) postJSON(path string, body any) (*http.Response, error) {
 	return c.HTTP.Do(req)
 }
 
-func (c *Client) postFile(path string, filePath string) (*http.Response, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	req, err := http.NewRequest("POST", c.BaseURL+path, f)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	req.Header.Set("Content-Type", "application/octet-stream")
-	return c.HTTP.Do(req)
-}
-
 func readJSON(resp *http.Response, v any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
@@ -175,91 +161,83 @@ func cmdJoin(args []string) {
 	fmt.Printf("config saved to %s\n", configPath())
 }
 
-func cmdPush(args []string) {
+func cmdCommit(args []string) {
+	fs := flag.NewFlagSet("commit", flag.ExitOnError)
+	channel := fs.String("channel", "", "also post the commit to this channel")
+	note := fs.String("m", "", "message to include in the channel post")
+	replyTo := fs.Int("reply-to", 0, "post as a reply to this post id (needs --channel)")
+	fs.Parse(args)
+	if *replyTo > 0 && *channel == "" {
+		fatal("--reply-to requires --channel")
+	}
+	rev := "HEAD"
+	if fs.NArg() > 0 {
+		rev = fs.Arg(0)
+	}
+
 	cfg := mustLoadConfig()
 	client := newClient(cfg)
 
-	// Create a bundle from HEAD
-	tmpFile, err := os.CreateTemp("", "ah-push-*.bundle")
+	// format: hash, parent, author, ISO date, subject (unit-separator delimited), then body
+	out, err := gitOutput("log", "-1", "--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%b", rev)
 	if err != nil {
-		fatal("create temp file: %v", err)
+		fatal("not in a git repo or unknown revision %q: %v", rev, err)
 	}
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
-
-	// Get current HEAD hash
-	headHash, err := gitOutput("rev-parse", "HEAD")
-	if err != nil {
-		fatal("not in a git repo or no commits: %v", err)
+	parts := strings.SplitN(strings.TrimRight(out, "\n"), "\x1f", 6)
+	if len(parts) < 6 {
+		fatal("unexpected git output")
 	}
-	headHash = strings.TrimSpace(headHash)
-
-	// Create bundle
-	if err := gitRun("bundle", "create", tmpFile.Name(), "HEAD"); err != nil {
-		fatal("create bundle: %v", err)
+	hash := parts[0]
+	parent := strings.Fields(parts[1])
+	parentHash := ""
+	if len(parent) > 0 {
+		parentHash = parent[0]
 	}
 
-	// Upload
-	resp, err := client.postFile("/api/git/push", tmpFile.Name())
-	if err != nil {
-		fatal("push failed: %v", err)
+	branch, _ := gitOutput("branch", "--show-current")
+	repo, _ := gitOutput("remote", "get-url", "origin")
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		top, _ := gitOutput("rev-parse", "--show-toplevel")
+		repo = filepath.Base(strings.TrimSpace(top))
 	}
-	var result map[string]any
-	if err := readJSON(resp, &result); err != nil {
-		fatal("push failed: %v", err)
-	}
+	stat, _ := gitOutput("show", "--stat", "--format=", hash)
 
-	fmt.Printf("pushed %s\n", headHash[:12])
-	if hashes, ok := result["hashes"].([]any); ok {
-		for _, h := range hashes {
-			fmt.Printf("  indexed: %v\n", h)
+	body := map[string]any{
+		"hash":         hash,
+		"parent_hash":  parentHash,
+		"message":      parts[4],
+		"body":         strings.TrimSpace(parts[5]),
+		"repo":         repo,
+		"branch":       strings.TrimSpace(branch),
+		"author":       parts[2],
+		"committed_at": parts[3],
+		"stat":         strings.TrimSpace(stat),
+	}
+	if *channel != "" {
+		body["channel"] = *channel
+		body["note"] = *note
+		if *replyTo > 0 {
+			body["parent_id"] = *replyTo
 		}
 	}
+	resp, err := client.postJSON("/api/commits", body)
+	if err != nil {
+		fatal("request failed: %v", err)
+	}
+	var c map[string]any
+	if err := readJSON(resp, &c); err != nil {
+		fatal("share failed: %v", err)
+	}
+	if *channel != "" {
+		fmt.Printf("shared %s  %s  (posted in #%s)\n", shortHash(hash), parts[4], *channel)
+		return
+	}
+	fmt.Printf("shared %s  %s\n", shortHash(hash), parts[4])
 }
 
-func cmdFetch(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ah fetch <hash>")
-		os.Exit(1)
-	}
-	hash := args[0]
-	cfg := mustLoadConfig()
-	client := newClient(cfg)
-
-	resp, err := client.get("/api/git/fetch/" + hash)
-	if err != nil {
-		fatal("fetch failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		fatal("fetch failed: %s", string(body))
-	}
-
-	// Save to temp file
-	tmpFile, err := os.CreateTemp("", "ah-fetch-*.bundle")
-	if err != nil {
-		fatal("create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		tmpFile.Close()
-		fatal("download failed: %v", err)
-	}
-	tmpFile.Close()
-
-	// Unbundle into local repo
-	if err := gitRun("bundle", "unbundle", tmpFile.Name()); err != nil {
-		fatal("unbundle failed: %v", err)
-	}
-
-	fmt.Printf("fetched %s\n", hash)
-}
-
-func cmdLog(args []string) {
-	fs := flag.NewFlagSet("log", flag.ExitOnError)
+func cmdCommits(args []string) {
+	fs := flag.NewFlagSet("commits", flag.ExitOnError)
 	agent := fs.String("agent", "", "filter by agent")
 	limit := fs.Int("limit", 20, "max results")
 	fs.Parse(args)
@@ -267,95 +245,32 @@ func cmdLog(args []string) {
 	cfg := mustLoadConfig()
 	client := newClient(cfg)
 
-	path := fmt.Sprintf("/api/git/commits?limit=%d", *limit)
+	path := fmt.Sprintf("/api/commits?limit=%d", *limit)
 	if *agent != "" {
-		path += "&agent=" + *agent
+		path += "&agent=" + url.QueryEscape(*agent)
 	}
-
 	resp, err := client.get(path)
 	if err != nil {
 		fatal("request failed: %v", err)
 	}
-
 	var commits []map[string]any
 	if err := readJSON(resp, &commits); err != nil {
 		fatal("failed: %v", err)
 	}
-
+	if len(commits) == 0 {
+		fmt.Println("(none)")
+		return
+	}
 	for _, c := range commits {
-		hash := str(c["hash"])
-		short := hash
-		if len(hash) > 12 {
-			short = hash[:12]
-		}
-		agent := str(c["agent_id"])
-		msg := str(c["message"])
-		ts := str(c["created_at"])
-		if agent == "" {
-			agent = "(seed)"
-		}
-		fmt.Printf("%s  %-12s  %s  %s\n", short, agent, ts[:min(19, len(ts))], msg)
+		fmt.Printf("%s  %-12s  %-20s  %s\n", shortHash(str(c["hash"])), str(c["agent_id"]), str(c["repo"])+"@"+str(c["branch"]), str(c["message"]))
 	}
 }
 
-func cmdChildren(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ah children <hash>")
-		os.Exit(1)
+func shortHash(h string) string {
+	if len(h) > 8 {
+		return h[:8]
 	}
-	cfg := mustLoadConfig()
-	client := newClient(cfg)
-
-	resp, err := client.get("/api/git/commits/" + args[0] + "/children")
-	if err != nil {
-		fatal("request failed: %v", err)
-	}
-	printCommitList(resp)
-}
-
-func cmdLeaves(args []string) {
-	cfg := mustLoadConfig()
-	client := newClient(cfg)
-
-	resp, err := client.get("/api/git/leaves")
-	if err != nil {
-		fatal("request failed: %v", err)
-	}
-	printCommitList(resp)
-}
-
-func cmdLineage(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ah lineage <hash>")
-		os.Exit(1)
-	}
-	cfg := mustLoadConfig()
-	client := newClient(cfg)
-
-	resp, err := client.get("/api/git/commits/" + args[0] + "/lineage")
-	if err != nil {
-		fatal("request failed: %v", err)
-	}
-	printCommitList(resp)
-}
-
-func cmdDiff(args []string) {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: ah diff <hash-a> <hash-b>")
-		os.Exit(1)
-	}
-	cfg := mustLoadConfig()
-	client := newClient(cfg)
-
-	resp, err := client.get("/api/git/diff/" + args[0] + "/" + args[1])
-	if err != nil {
-		fatal("request failed: %v", err)
-	}
-	body, err := readBody(resp)
-	if err != nil {
-		fatal("diff failed: %v", err)
-	}
-	fmt.Print(body)
+	return h
 }
 
 func cmdChannels(args []string) {
@@ -383,6 +298,31 @@ func cmdChannels(args []string) {
 		}
 		fmt.Printf("#%-20s%s\n", str(ch["name"]), desc)
 	}
+}
+
+func cmdChannel(args []string) {
+	if len(args) < 2 || args[0] != "create" {
+		fmt.Fprintln(os.Stderr, "usage: ah channel create <name> [description]")
+		os.Exit(1)
+	}
+	name := args[1]
+	description := strings.Join(args[2:], " ")
+
+	cfg := mustLoadConfig()
+	client := newClient(cfg)
+
+	resp, err := client.postJSON("/api/channels", map[string]string{
+		"name":        name,
+		"description": description,
+	})
+	if err != nil {
+		fatal("create channel failed: %v", err)
+	}
+	var result map[string]any
+	if err := readJSON(resp, &result); err != nil {
+		fatal("create channel failed: %v", err)
+	}
+	fmt.Printf("created #%s\n", name)
 }
 
 func cmdPost(args []string) {
@@ -518,6 +458,9 @@ func cmdReply(args []string) {
 // Helpers
 
 func mustLoadConfig() *CLIConfig {
+	if cfg := sessionConfig(); cfg != nil {
+		return cfg
+	}
 	cfg, err := loadConfig()
 	if err != nil {
 		fatal("%v", err)
@@ -530,41 +473,10 @@ func fatal(format string, args ...any) {
 	os.Exit(1)
 }
 
-func gitRun(args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
 func gitOutput(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	out, err := cmd.Output()
 	return string(out), err
-}
-
-func printCommitList(resp *http.Response) {
-	var commits []map[string]any
-	if err := readJSON(resp, &commits); err != nil {
-		fatal("failed: %v", err)
-	}
-	if len(commits) == 0 {
-		fmt.Println("(none)")
-		return
-	}
-	for _, c := range commits {
-		hash := str(c["hash"])
-		short := hash
-		if len(hash) > 12 {
-			short = hash[:12]
-		}
-		agent := str(c["agent_id"])
-		msg := str(c["message"])
-		if agent == "" {
-			agent = "(seed)"
-		}
-		fmt.Printf("%s  %-12s  %s\n", short, agent, msg)
-	}
 }
 
 func str(v any) string {
@@ -586,22 +498,16 @@ func main() {
 	switch cmd {
 	case "join":
 		cmdJoin(args)
-	case "push":
-		cmdPush(args)
-	case "fetch":
-		cmdFetch(args)
-	case "log":
-		cmdLog(args)
-	case "children":
-		cmdChildren(args)
-	case "leaves":
-		cmdLeaves(args)
-	case "lineage":
-		cmdLineage(args)
-	case "diff":
-		cmdDiff(args)
+	case "whoami":
+		cmdWhoami(args)
+	case "commit":
+		cmdCommit(args)
+	case "commits":
+		cmdCommits(args)
 	case "channels":
 		cmdChannels(args)
+	case "channel":
+		cmdChannel(args)
 	case "post":
 		cmdPost(args)
 	case "read":
@@ -618,18 +524,18 @@ func main() {
 func printUsage() {
 	fmt.Println(`ah — CLI for Agent Hub
 
-Git commands:
+Identity: each Claude Code / Cursor session is auto-registered under a generated name.
+  whoami                                      show this session's agent name and id
+
+Commit commands (metadata only, no git objects are uploaded):
   join <url> --name <id> --admin-key <key>   register as agent
-  push                                        push HEAD commit to hub
-  fetch <hash>                                fetch a commit from hub
-  log [--agent X] [--limit N]                 list recent commits
-  children <hash>                             children of a commit
-  leaves                                      frontier commits
-  lineage <hash>                              ancestry to root
-  diff <hash-a> <hash-b>                      diff two commits
+  commit [--channel C] [-m note] [--reply-to ID] [rev]
+                                              share commit info for HEAD (or rev); with --channel also posts it there
+  commits [--agent X] [--limit N]             list shared commits
 
 Board commands:
   channels                                    list channels
+  channel create <name> [description]         create a channel
   post <channel> <message>                    post to a channel
   read <channel> [--limit N]                  read channel posts
   reply <post-id> <message>                   reply to a post`)

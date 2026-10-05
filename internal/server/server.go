@@ -8,28 +8,24 @@ import (
 
 	"agenthub/internal/auth"
 	"agenthub/internal/db"
-	"agenthub/internal/gitrepo"
 )
 
 type Config struct {
-	MaxBundleSize    int64  // max bundle upload size in bytes
-	MaxPushesPerHour int    // per agent
-	MaxPostsPerHour  int    // per agent
-	ListenAddr       string // e.g. ":8080"
+	MaxCommitsPerHour int    // per agent
+	MaxPostsPerHour   int    // per agent
+	ListenAddr        string // e.g. ":8080"
 }
 
 type Server struct {
 	db       *db.DB
-	repo     *gitrepo.Repo
 	adminKey string
 	mux      *http.ServeMux
 	config   Config
 }
 
-func New(database *db.DB, repo *gitrepo.Repo, adminKey string, cfg Config) *Server {
+func New(database *db.DB, adminKey string, cfg Config) *Server {
 	s := &Server{
 		db:       database,
-		repo:     repo,
 		adminKey: adminKey,
 		mux:      http.NewServeMux(),
 		config:   cfg,
@@ -42,15 +38,10 @@ func (s *Server) setupRoutes() {
 	authMw := auth.Middleware(s.db)
 	adminMw := auth.AdminMiddleware(s.adminKey)
 
-	// Git endpoints
-	s.mux.Handle("POST /api/git/push", authMw(http.HandlerFunc(s.handleGitPush)))
-	s.mux.Handle("GET /api/git/fetch/{hash}", authMw(http.HandlerFunc(s.handleGitFetch)))
-	s.mux.Handle("GET /api/git/commits", authMw(http.HandlerFunc(s.handleListCommits)))
-	s.mux.Handle("GET /api/git/commits/{hash}", authMw(http.HandlerFunc(s.handleGetCommit)))
-	s.mux.Handle("GET /api/git/commits/{hash}/children", authMw(http.HandlerFunc(s.handleGetChildren)))
-	s.mux.Handle("GET /api/git/commits/{hash}/lineage", authMw(http.HandlerFunc(s.handleGetLineage)))
-	s.mux.Handle("GET /api/git/leaves", authMw(http.HandlerFunc(s.handleGetLeaves)))
-	s.mux.Handle("GET /api/git/diff/{hash_a}/{hash_b}", authMw(http.HandlerFunc(s.handleDiff)))
+	// Commit metadata endpoints (no git objects are stored)
+	s.mux.Handle("POST /api/commits", authMw(http.HandlerFunc(s.handleShareCommit)))
+	s.mux.Handle("GET /api/commits", authMw(http.HandlerFunc(s.handleListCommits)))
+	s.mux.Handle("GET /api/commits/{hash}", authMw(http.HandlerFunc(s.handleGetCommit)))
 
 	// Message board endpoints
 	s.mux.Handle("GET /api/channels", authMw(http.HandlerFunc(s.handleListChannels)))
@@ -65,13 +56,20 @@ func (s *Server) setupRoutes() {
 
 	// Public registration (no auth, rate-limited by IP)
 	s.mux.HandleFunc("POST /api/register", s.handleRegister)
+	s.mux.HandleFunc("POST /api/sessions", s.handleSession)
+	s.mux.HandleFunc("GET /ui/session/{name}", s.handleUISession)
 
 	// Health check (no auth)
 	s.mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	// Dashboard (no auth, public read-only)
+	// Dashboard UI: public read; human posting/channel creation is loopback-only
+	s.mux.HandleFunc("POST /ui/post", s.handleUIPost)
+	s.mux.HandleFunc("POST /ui/channel", s.handleUIChannel)
+	s.mux.HandleFunc("POST /ui/delete-post", s.handleUIDeletePost)
+	s.mux.HandleFunc("POST /ui/delete-channel", s.handleUIDeleteChannel)
+	s.mux.HandleFunc("POST /ui/delete-commit", s.handleUIDeleteCommit)
 	s.mux.HandleFunc("GET /", s.handleDashboard)
 }
 
