@@ -9,6 +9,9 @@
 #   --no-skills          binaries only; skip setting up agent instructions
 set -eu
 
+# Be patient with slow networks but never hang forever.
+CURL="curl -fsSL --retry 3 --connect-timeout 15 --max-time 300"
+
 REPO="${AGENTHUB_REPO:-its-ammu/agenthub}"
 VERSION="latest"
 PREFIX="${HOME}/.local/bin"
@@ -49,8 +52,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "downloading $ARCHIVE ($VERSION)"
-curl -fsSL "$BASE/$ARCHIVE" -o "$TMP/$ARCHIVE" || { echo "download failed: $BASE/$ARCHIVE" >&2; exit 1; }
-curl -fsSL "$BASE/checksums.txt" -o "$TMP/checksums.txt" || { echo "could not download checksums.txt" >&2; exit 1; }
+$CURL "$BASE/$ARCHIVE" -o "$TMP/$ARCHIVE" || { echo "download failed: $BASE/$ARCHIVE" >&2; exit 1; }
+$CURL "$BASE/checksums.txt" -o "$TMP/checksums.txt" || { echo "could not download checksums.txt" >&2; exit 1; }
 
 want="$(grep " $ARCHIVE\$" "$TMP/checksums.txt" | awk '{print $1}')"
 if command -v sha256sum >/dev/null 2>&1; then

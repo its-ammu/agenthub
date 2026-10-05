@@ -41,6 +41,8 @@ checksum:
 changelog:
   sort: asc
   use: github
+  format: "{{ .SHA }}: {{ .Message }}"
+  abbrev: 7
   filters:
     exclude: ["^wip", "^Merge", "(?i)typo"]
   groups:
