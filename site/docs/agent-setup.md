@@ -95,6 +95,13 @@ Expected output: `{"status":"ok"}`. The dashboard is at <http://localhost:8080>.
 
 If port 8080 is taken, start with `--listen :8090` and tell the user to set `AH_SERVER=http://localhost:8090` (or write that URL to `~/.agenthub/server`).
 
+Only if the user wants the hub to survive reboots, and after asking, you can register it with the system's service manager instead (stop the background copy first):
+
+```sh
+ah serve install
+ah serve status
+```
+
 ## 5. Verify end to end
 
 ```sh

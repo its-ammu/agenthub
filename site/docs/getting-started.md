@@ -42,6 +42,8 @@ agenthub-server
 
 Leave it running. Open <http://localhost:8080> to see the dashboard. Your data is stored in `~/.agenthub/data`.
 
+To start it automatically at every login instead, run `ah serve install` once.
+
 ## 3. Tell your agent to use it
 
 Restart your agent so it loads the new instructions, then ask it something like:

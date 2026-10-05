@@ -42,6 +42,7 @@ type Channel struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
+	Archived    bool      `json:"archived,omitempty"` // read-only and hidden from default lists
 }
 
 type Post struct {
@@ -134,6 +135,12 @@ func (d *DB) Migrate() error {
 	// Commit metadata columns (older databases only had hash/parent/agent/message).
 	for _, col := range []string{"body TEXT DEFAULT ''", "repo TEXT DEFAULT ''", "branch TEXT DEFAULT ''", "author TEXT DEFAULT ''", "stat TEXT DEFAULT ''", "committed_at TEXT DEFAULT ''", "post_id INTEGER"} {
 		_, err := d.db.Exec("ALTER TABLE commits ADD COLUMN " + col)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	for _, col := range []string{"archived INTEGER NOT NULL DEFAULT 0"} {
+		_, err := d.db.Exec("ALTER TABLE channels ADD COLUMN " + col)
 		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
 		}
@@ -337,8 +344,9 @@ func (d *DB) CreateChannel(name, description string) error {
 	return err
 }
 
+// ListChannels returns every channel, archived ones included (see Channel.Archived).
 func (d *DB) ListChannels() ([]Channel, error) {
-	rows, err := d.db.Query("SELECT id, name, description, created_at FROM channels ORDER BY name")
+	rows, err := d.db.Query("SELECT id, name, description, created_at, archived FROM channels ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +354,7 @@ func (d *DB) ListChannels() ([]Channel, error) {
 	var channels []Channel
 	for rows.Next() {
 		var ch Channel
-		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Description, &ch.CreatedAt); err != nil {
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Description, &ch.CreatedAt, &ch.Archived); err != nil {
 			return nil, err
 		}
 		channels = append(channels, ch)
@@ -354,10 +362,21 @@ func (d *DB) ListChannels() ([]Channel, error) {
 	return channels, rows.Err()
 }
 
+// SetChannelArchived archives or restores a channel. Archived channels keep
+// their posts but stop accepting new ones.
+func (d *DB) SetChannelArchived(id int, archived bool) error {
+	v := 0
+	if archived {
+		v = 1
+	}
+	_, err := d.db.Exec("UPDATE channels SET archived = ? WHERE id = ?", v, id)
+	return err
+}
+
 func (d *DB) GetChannelByName(name string) (*Channel, error) {
 	var ch Channel
-	err := d.db.QueryRow("SELECT id, name, description, created_at FROM channels WHERE name = ?", name).
-		Scan(&ch.ID, &ch.Name, &ch.Description, &ch.CreatedAt)
+	err := d.db.QueryRow("SELECT id, name, description, created_at, archived FROM channels WHERE name = ?", name).
+		Scan(&ch.ID, &ch.Name, &ch.Description, &ch.CreatedAt, &ch.Archived)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -528,6 +547,7 @@ func (d *DB) RecentPosts(limit int) ([]PostWithChannel, error) {
 	rows, err := d.db.Query(`
 		SELECT p.id, p.channel_id, p.agent_id, p.parent_id, p.content, p.created_at, c.name
 		FROM posts p JOIN channels c ON p.channel_id = c.id
+		WHERE c.archived = 0
 		ORDER BY p.created_at DESC, p.id DESC LIMIT ?
 	`, limit)
 	if err != nil {

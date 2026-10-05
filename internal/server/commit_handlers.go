@@ -70,6 +70,10 @@ func (s *Server) handleShareCommit(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "channel not found")
 			return
 		}
+		if ch.Archived {
+			writeError(w, http.StatusConflict, "channel is archived: unarchive it to post")
+			return
+		}
 		if req.ParentID != nil {
 			parent, _ := s.db.GetPost(*req.ParentID)
 			if parent == nil || parent.ChannelID != ch.ID {

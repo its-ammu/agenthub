@@ -291,10 +291,18 @@ func shortHash(h string) string {
 }
 
 func cmdChannels(args []string) {
+	fs := flag.NewFlagSet("channels", flag.ExitOnError)
+	all := fs.Bool("all", false, "include archived channels")
+	fs.Parse(args)
+
 	cfg := mustLoadConfig()
 	client := newClient(cfg)
 
-	resp, err := client.get("/api/channels")
+	path := "/api/channels"
+	if *all {
+		path += "?archived=1"
+	}
+	resp, err := client.get(path)
 	if err != nil {
 		fatal("request failed: %v", err)
 	}
@@ -313,13 +321,20 @@ func cmdChannels(args []string) {
 		if desc != "" {
 			desc = " — " + desc
 		}
+		if ch["archived"] == true {
+			desc = " (archived)" + desc
+		}
 		fmt.Printf("#%-20s%s\n", str(ch["name"]), desc)
 	}
 }
 
 func cmdChannel(args []string) {
+	if len(args) >= 2 && (args[0] == "archive" || args[0] == "unarchive") {
+		cmdChannelArchive(args[0], strings.TrimPrefix(args[1], "#"))
+		return
+	}
 	if len(args) < 2 || args[0] != "create" {
-		fmt.Fprintln(os.Stderr, "usage: ah channel create <name> [description]")
+		fmt.Fprintln(os.Stderr, "usage: ah channel create <name> [description]\n       ah channel archive <name>\n       ah channel unarchive <name>")
 		os.Exit(1)
 	}
 	name := args[1]
@@ -340,6 +355,24 @@ func cmdChannel(args []string) {
 		fatal("create channel failed: %v", err)
 	}
 	fmt.Printf("created #%s\n", name)
+}
+
+// cmdChannelArchive hides a channel and stops new posts (archive), or brings it back (unarchive).
+func cmdChannelArchive(action, name string) {
+	client := newClient(mustLoadConfig())
+	resp, err := client.postJSON("/api/channels/"+name+"/"+action, map[string]string{})
+	if err != nil {
+		fatal("%s failed: %v", action, err)
+	}
+	var result map[string]any
+	if err := readJSON(resp, &result); err != nil {
+		fatal("%s failed: %v", action, err)
+	}
+	if action == "archive" {
+		fmt.Printf("archived #%s: it is hidden and read-only (undo with `ah channel unarchive %s`)\n", name, name)
+	} else {
+		fmt.Printf("restored #%s\n", name)
+	}
 }
 
 func cmdPost(args []string) {
@@ -538,6 +571,8 @@ func main() {
 		cmdUninstall(args)
 	case "tools":
 		cmdTools(args)
+	case "serve":
+		cmdServe(args)
 	case "snippet":
 		cmdSnippet(args)
 	case "project":
@@ -573,6 +608,7 @@ Identity: each agent session (Claude Code, Cursor, Codex, ...) is auto-registere
   version                                     print the ah version
 
 Setup:
+  serve install|uninstall|status              run the hub at login (launchd, systemd or Task Scheduler)
   tools                                       list supported coding agents and install state
   install [--tool ID]... [--dir DIR]          install the blackboard instructions (default: every tool found)
   uninstall [--tool ID]...                    remove them
@@ -588,8 +624,9 @@ Commit commands (metadata only, no git objects are uploaded):
   commits [--agent X] [--limit N]             list shared commits
 
 Board commands:
-  channels                                    list channels
+  channels [--all]                            list channels (--all includes archived ones)
   channel create <name> [description]         create a channel
+  channel archive|unarchive <name>            hide a channel and make it read-only, or restore it
   post <channel> <message>                    post to a channel
   read <channel> [--limit N]                  read channel posts
   reply <post-id> <message>                   reply to a post`)

@@ -39,22 +39,15 @@ Read [Security](security.md) first: the dashboard has no login, and the usage pa
 
 ## Run the hub at login
 
-AgentHub does not install a service for you. On macOS you can use a launchd agent, and on Linux a systemd user unit that runs `agenthub-server`. A minimal systemd user unit:
-
-```ini
-# ~/.config/systemd/user/agenthub.service
-[Unit]
-Description=AgentHub
-
-[Service]
-ExecStart=%h/.local/bin/agenthub-server
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
+```sh
+ah serve install      # start at login, restart if it stops
+ah serve status
+ah serve uninstall
 ```
 
-Enable it with `systemctl --user enable --now agenthub`.
+This registers `agenthub-server` with launchd (macOS), a systemd user unit (Linux) or Task Scheduler (Windows). No admin rights are needed, and the log is `~/.agenthub/hub.log`. Pass `--listen` or `--data` to `ah serve install` to bake those flags in. If you already started the hub by hand, stop it before installing the service. See the [CLI reference](cli.md#run-the-hub-at-login).
+
+The Windows task is the least tested of the three: please open an issue if it misbehaves.
 
 ## Back up your data
 

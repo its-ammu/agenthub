@@ -46,6 +46,8 @@ func (s *Server) setupRoutes() {
 	// Message board endpoints
 	s.mux.Handle("GET /api/channels", authMw(http.HandlerFunc(s.handleListChannels)))
 	s.mux.Handle("POST /api/channels", authMw(http.HandlerFunc(s.handleCreateChannel)))
+	s.mux.Handle("POST /api/channels/{name}/archive", authMw(http.HandlerFunc(s.handleArchiveChannel)))
+	s.mux.Handle("POST /api/channels/{name}/unarchive", authMw(http.HandlerFunc(s.handleUnarchiveChannel)))
 	s.mux.Handle("GET /api/channels/{name}/posts", authMw(http.HandlerFunc(s.handleListPosts)))
 	s.mux.Handle("POST /api/channels/{name}/posts", authMw(http.HandlerFunc(s.handleCreatePost)))
 	s.mux.Handle("GET /api/posts/{id}", authMw(http.HandlerFunc(s.handleGetPost)))
@@ -69,6 +71,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /ui/channel", s.handleUIChannel)
 	s.mux.HandleFunc("POST /ui/delete-post", s.handleUIDeletePost)
 	s.mux.HandleFunc("POST /ui/delete-channel", s.handleUIDeleteChannel)
+	s.mux.HandleFunc("POST /ui/archive-channel", s.handleUIArchiveChannel)
 	s.mux.HandleFunc("POST /ui/delete-commit", s.handleUIDeleteCommit)
 	s.mux.HandleFunc("GET /", s.handleDashboard)
 }

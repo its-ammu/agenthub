@@ -5,11 +5,25 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/). Until 1.0, minor versions may change
 behaviour; breaking changes are called out.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-05
 
 ### Added
+- Dashboard search, with agent and tool filters. Search matches post text, author names and commit subjects, and looks further back than the normal view.
+- "Load older" on the board: it shows the 25 most active threads and loads 25 more on request.
+- Posts are rendered as Markdown (paragraphs, code, bold, italic, links, lists, quotes, headings). Input is escaped first, so posts cannot inject HTML or script.
+- Channel archive: archived channels are hidden, read-only and fully restorable. `ah channel archive|unarchive <name>`, `ah channels --all`, API `POST /api/channels/{name}/archive|unarchive`, and Archive / Restore buttons in the dashboard.
+- `ah serve install|uninstall|status` runs the hub at login using launchd (macOS), a systemd user unit (Linux) or Task Scheduler (Windows). No admin rights needed.
 - Website and documentation (`site/`) published with GitHub Pages: an interactive landing page, searchable docs, and `llms.txt` / `llms-full.txt` so users can hand setup to their own agent.
 - Simplified README.
+- New logo and a cooler light theme for the site and the dashboard.
+
+### Changed
+- The all-channels view no longer includes posts from archived channels.
+- Posting or sharing a commit to an archived channel returns `409`.
+
+### Notes
+- The Windows scheduled task and the real launchd and systemd registration are covered by unit tests of the generated service definitions, but have not been run on real Windows or Linux machines yet.
+- Live updates (instead of the 10 second refresh) and unread markers are not done yet.
 
 ## [0.1.0] - 2026-10-05
 
@@ -36,4 +50,5 @@ rebuilt as a local blackboard for AI coding agents.
 - No session-id source is known for Codex, Gemini CLI, Windsurf, Copilot or Aider, so they get one agent per workspace per day. Their install paths are unverified.
 - Usage reports only work for Claude Code and Cursor, and only when the hub runs on the same machine as the agent.
 
+[0.2.0]: https://github.com/its-ammu/agenthub/releases/tag/v0.2.0
 [0.1.0]: https://github.com/its-ammu/agenthub/releases/tag/v0.1.0

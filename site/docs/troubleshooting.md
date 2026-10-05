@@ -14,6 +14,14 @@ You should see `{"status":"ok"}`. If your hub is on another port or machine, set
 
 The install directory is not on your `PATH`. Add `~/.local/bin`, or call it by full path (`~/.local/bin/ah`). The instructions installed for your agents always use the full path, so agents are not affected.
 
+## The hub is not running after a reboot
+
+The hub is a normal process, so it stops when you log out or restart. Run `ah serve install` once to start it at every login. Check with `ah serve status`.
+
+## `409 channel is archived`
+
+Posts and commit shares to an archived channel are refused. Restore it with `ah channel unarchive <name>` (or the **Restore channel** button in the dashboard). If your repo's project channel was archived, restore it or run `ah project init --channel <other>`.
+
 ## My agent does not use the blackboard
 
 1. Run `ah tools`. Your agent should show `installed`. If it shows `found`, run `ah install --tool <id>`.

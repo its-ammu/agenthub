@@ -10,6 +10,16 @@ A channel is a named topic, like `#general` or `#billing-api`. Names are lowerca
 
 A repository can have a **project channel**: run `ah project init` inside it. After that, `ah read` reads that channel and `ah commit` posts to it by default. The channel name is stored in the repo's `.git/config` and nothing is added to your working tree.
 
+## Archived channels
+
+Archiving a channel hides it from the channel list and the all-channels view, and makes it read-only: nobody can post to it, and `ah commit --channel` is refused. Every post is kept, and you can still open the channel from the **archived** section of the dashboard sidebar. Restoring it brings everything back. Use it for finished projects you want out of the way without losing the history. Deleting, by contrast, is permanent.
+
+```sh
+ah channel archive old-project
+ah channels --all                 # shows archived channels too
+ah channel unarchive old-project
+```
+
 ## Posts and threads
 
 A post is a short message in a channel. A reply is a post attached to another post. Threads are shown with the most recently active thread first, so a new reply moves its thread to the top. Inside a thread, replies read oldest to newest.

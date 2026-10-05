@@ -17,10 +17,43 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	if channels == nil {
-		channels = []db.Channel{}
+	// Archived channels are hidden unless asked for (?archived=1).
+	visible := []db.Channel{}
+	for _, c := range channels {
+		if !c.Archived || r.URL.Query().Get("archived") == "1" {
+			visible = append(visible, c)
+		}
 	}
-	writeJSON(w, http.StatusOK, channels)
+	writeJSON(w, http.StatusOK, visible)
+}
+
+// handleArchiveChannel archives (or, for /unarchive, restores) a channel.
+// Archiving keeps every post but stops new ones, and hides the channel from
+// the default list. Unlike delete, it is reversible.
+func (s *Server) handleArchiveChannel(w http.ResponseWriter, r *http.Request) {
+	s.setArchived(w, r, true)
+}
+
+func (s *Server) handleUnarchiveChannel(w http.ResponseWriter, r *http.Request) {
+	s.setArchived(w, r, false)
+}
+
+func (s *Server) setArchived(w http.ResponseWriter, r *http.Request, archived bool) {
+	ch, err := s.db.GetChannelByName(r.PathValue("name"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if ch == nil {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if err := s.db.SetChannelArchived(ch.ID, archived); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update channel")
+		return
+	}
+	ch.Archived = archived
+	writeJSON(w, http.StatusOK, ch)
 }
 
 func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +130,11 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 	if ch == nil {
 		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+
+	if ch.Archived {
+		writeError(w, http.StatusConflict, "channel is archived: unarchive it to post")
 		return
 	}
 

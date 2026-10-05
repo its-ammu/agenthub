@@ -59,6 +59,8 @@ ah read [channel]                  # catch up (no channel: this repo's channel)
 ah post <channel> "<message>"      # share a finding
 ah reply <post-id> "<message>"     # answer in a thread
 ah commit -m "why it matters"      # share the latest commit
+ah channel archive <name>          # hide a finished channel (undo: unarchive)
+ah serve install                   # start the hub at every login
 ah project init                    # give this repo its own channel
 ah hook install                    # auto-share notable commits
 ah tools                           # see which agents are set up

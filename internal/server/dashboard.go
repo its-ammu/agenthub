@@ -45,6 +45,17 @@ type dashboardData struct {
 	Now          time.Time
 	ChannelDesc  string
 	PostCount    int
+
+	Archived        []db.Channel // archived channels, tucked away in the sidebar
+	ArchivedCount   int
+	ChannelArchived bool // the selected channel is archived
+	Filter          threadFilter
+	FilterActive    bool
+	FilterAgents    []string // agents seen in the loaded posts, for the dropdown
+	FilterTools     []string
+	Matched         int    // threads that match the filter
+	MoreCount       int    // matching threads not shown yet
+	MoreURL         string // "load older" link
 }
 
 // buildThreads groups posts into top-level threads with all descendant replies
@@ -121,7 +132,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data.Stats, _ = s.db.GetStats()
-	data.Channels, _ = s.db.ListChannels()
+	allChannels, _ := s.db.ListChannels()
+	for _, c := range allChannels {
+		if c.Archived {
+			data.Archived = append(data.Archived, c)
+			data.ArchivedCount++
+		} else {
+			data.Channels = append(data.Channels, c)
+		}
+	}
 	tools := map[string]string{}
 	if agents, err := s.db.ListAgents(); err == nil {
 		for i := len(agents) - 1; i >= 0; i-- {
@@ -142,12 +161,19 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if data.View == "commits" {
 		data.Commits, _ = s.db.ListCommits(q.Get("agent"), 200, 0)
 	} else {
+		data.Filter = threadFilter{Query: strings.TrimSpace(q.Get("q")), Agent: q.Get("agent"), Tool: q.Get("tool")}
+		data.FilterActive = data.Filter.active()
+		window := postWindow
+		if data.FilterActive {
+			window = postWindowBig // look further back when searching
+		}
 		var posts []db.PostWithChannel
 		if data.Selected == "" {
-			posts, _ = s.db.RecentPosts(500)
+			posts, _ = s.db.RecentPosts(window)
 		} else if ch, _ := s.db.GetChannelByName(data.Selected); ch != nil {
 			data.ChannelDesc = ch.Description
-			plain, _ := s.db.ListPosts(ch.ID, 500, 0)
+			data.ChannelArchived = ch.Archived
+			plain, _ := s.db.ListPosts(ch.ID, window, 0)
 			for _, p := range plain {
 				posts = append(posts, db.PostWithChannel{Post: p, ChannelName: ch.Name})
 			}
@@ -159,7 +185,16 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				linked[*cs[i].PostID] = &cs[i]
 			}
 		}
-		data.Threads = buildThreads(posts, data.Selected == "", linked, tools)
+		all := buildThreads(posts, data.Selected == "", linked, tools)
+		data.FilterAgents, data.FilterTools = filterChoices(all)
+		matched := filterThreads(all, data.Filter)
+		data.Matched = len(matched)
+		if n := pageSize(q.Get("n")); len(matched) > n {
+			data.MoreCount = len(matched) - n
+			data.MoreURL = boardURL(data.Selected, data.Filter, n+threadPage)
+			matched = matched[:n]
+		}
+		data.Threads = matched
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -201,6 +236,10 @@ func (s *Server) handleUIPost(w http.ResponseWriter, r *http.Request) {
 	ch, _ := s.db.GetChannelByName(channel)
 	if ch == nil {
 		redirectBoard(w, r, "", "channel not found")
+		return
+	}
+	if ch.Archived {
+		redirectBoard(w, r, channel, "this channel is archived: restore it to post")
 		return
 	}
 	if content == "" || len(content) > 32*1024 {
@@ -296,6 +335,34 @@ func (s *Server) handleUIDeleteCommit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// handleUIArchiveChannel archives or restores a channel (form field "restore").
+func (s *Server) handleUIArchiveChannel(w http.ResponseWriter, r *http.Request) {
+	if !isLoopback(r) {
+		http.Error(w, "only allowed from localhost", http.StatusForbidden)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4*1024)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	ch, _ := s.db.GetChannelByName(r.FormValue("channel"))
+	if ch == nil {
+		redirectBoard(w, r, "", "channel not found")
+		return
+	}
+	restore := r.FormValue("restore") != ""
+	if err := s.db.SetChannelArchived(ch.ID, !restore); err != nil {
+		redirectBoard(w, r, ch.Name, "failed to update channel")
+		return
+	}
+	if restore {
+		redirectBoard(w, r, ch.Name, "")
+		return
+	}
+	redirectBoard(w, r, "", "")
 }
 
 // handleUIDeleteChannel deletes a channel and all of its posts.
@@ -415,6 +482,7 @@ var funcMap = template.FuncMap{
 	"initial":   initial,
 	"hue":       hue,
 	"plural":    plural,
+	"md":        renderMarkdown,
 	"len":       func(v []postView) int { return len(v) },
 }
 
@@ -478,7 +546,27 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
   .badge { background: var(--gold-bg); color: var(--on-accent); border-radius: 3px; padding: 0 6px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
   .channel-tag { background: var(--blue-bg); color: var(--blue); padding: 1px 6px; border-radius: 3px; }
   .to, .time, .pid { color: var(--faint); }
-  .content { margin-top: 4px; color: var(--body); white-space: pre-wrap; word-break: break-word; }
+  .content { margin-top: 4px; color: var(--body); word-break: break-word; }
+  .content p { margin: 0 0 .6em; } .content > :last-child { margin-bottom: 0; }
+  .content .md-h { font-weight: bold; color: var(--strong); }
+  .content code { background: var(--tag-bg); border-radius: 3px; padding: 0 4px; font-size: 12.5px; }
+  .content pre { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; margin: 0 0 .6em; overflow-x: auto; font-size: 12.5px; color: var(--pre); }
+  .content pre code { background: none; padding: 0; }
+  .content ul, .content ol { margin: .2em 0 .6em 1.5em; }
+  .content blockquote { border-left: 2px solid var(--line); padding-left: 10px; color: var(--muted); margin: 0 0 .6em; }
+  .content a { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .filters input[type=search], .filters select { background: var(--card); border: 1px solid var(--line); color: var(--text); border-radius: 5px; padding: 6px 8px; font: inherit; font-size: 12px; }
+  .filters input[type=search] { flex: 1; min-width: 160px; }
+  .filters .btn { padding: 5px 12px; font-size: 12px; }
+  .filters .clear { color: var(--muted); font-size: 12px; text-decoration: underline; }
+  .summary { color: var(--muted); font-size: 12px; margin: -4px 0 12px; }
+  .more-threads { display: block; text-align: center; margin: 4px 0 24px; padding: 8px; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: 12px; }
+  .more-threads:hover { color: var(--strong); border-color: var(--faint); }
+  .arch-note { color: var(--muted); font-size: 12px; border: 1px dashed var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
+  .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: normal; padding: 4px 10px; font-size: 12px; }
+  .btn.ghost:hover { color: var(--strong); border-color: var(--faint); }
+  .top-actions { margin-left: auto; display: flex; gap: 8px; }
   .row-actions { display: flex; align-items: flex-start; gap: 14px; margin-top: 8px; font-size: 12px; }
   .push { margin-left: auto; }
   .row-actions form.inline { display: inline; }
@@ -586,7 +674,7 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
       <span class="pid">#{{.ID}}</span>
       {{if .ShowChannel}}<span class="channel-tag"># {{.ChannelName}}</span>{{end}}
     </div>
-    <div class="content">{{.Content}}</div>
+    <div class="content">{{md .Content}}</div>
     {{with .Commit}}{{template "commitcard" .}}{{end}}
     <div class="row-actions">
       <details class="reply-box">
@@ -618,6 +706,10 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
   <a class="nav {{if and (eq .View "board") (eq .Selected "")}}active{{end}}" href="/?channel=">all channels</a>
   {{range .Channels}}<a class="nav {{if and (eq $.View "board") (eq .Name $.Selected)}}active{{end}}" href="/?channel={{.Name}}"># {{.Name}}</a>
   {{end}}
+  {{if .Archived}}<details class="more-sessions" {{if .ChannelArchived}}open{{end}}><summary>archived ({{.ArchivedCount}})</summary>
+    {{range .Archived}}<a class="nav {{if and (eq $.View "board") (eq .Name $.Selected)}}active{{end}}" href="/?channel={{.Name}}"># {{.Name}}</a>
+    {{end}}
+  </details>{{end}}
   {{if .Sessions}}
   <div class="side-label">Sessions</div>
   {{range $i, $s := .Sessions}}{{if lt $i 5}}<button type="button" class="nav agent-link" data-agent="{{$s.ID}}"><span class="dot dot-{{$s.Tool}}"></span>{{$s.ID}}</button>
@@ -643,10 +735,17 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
     <h1>{{if eq .View "commits"}}Commits{{else if .Selected}}# {{.Selected}}{{else}}All channels{{end}}</h1>
     {{if .ChannelDesc}}<div class="desc">{{.ChannelDesc}}</div>{{end}}
     {{if and (eq .View "board") .Selected}}
-    <form class="spacer" method="post" action="/ui/delete-channel" data-confirm="Delete #{{.Selected}} and all {{plural .PostCount "post"}} in it? This cannot be undone.">
-      <input type="hidden" name="channel" value="{{.Selected}}">
-      <button class="btn danger" type="submit">Delete channel</button>
-    </form>
+    <div class="top-actions spacer">
+      <form method="post" action="/ui/archive-channel">
+        <input type="hidden" name="channel" value="{{.Selected}}">
+        {{if .ChannelArchived}}<input type="hidden" name="restore" value="1"><button class="btn ghost" type="submit">Restore channel</button>
+        {{else}}<button class="btn ghost" type="submit" title="Hide this channel and stop new posts. You can restore it later.">Archive channel</button>{{end}}
+      </form>
+      <form method="post" action="/ui/delete-channel" data-confirm="Delete #{{.Selected}} and all {{plural .PostCount "post"}} in it? This cannot be undone.">
+        <input type="hidden" name="channel" value="{{.Selected}}">
+        <button class="btn danger" type="submit">Delete channel</button>
+      </form>
+    </div>
     {{end}}
   </div>
   <div class="scroll"><div class="col">
@@ -662,7 +761,19 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
     </div>
 
     {{else}}
-    {{if .Selected}}
+    <form class="filters" method="get" action="/" role="search">
+      <input type="hidden" name="channel" value="{{.Selected}}">
+      <input type="search" name="q" value="{{.Filter.Query}}" placeholder="Search posts, agents and commits" aria-label="Search posts">
+      <select name="agent" aria-label="Filter by agent"><option value="">any agent</option>
+        {{range .FilterAgents}}<option value="{{.}}" {{if eq . $.Filter.Agent}}selected{{end}}>{{.}}</option>{{end}}</select>
+      <select name="tool" aria-label="Filter by tool"><option value="">any tool</option>
+        {{range .FilterTools}}<option value="{{.}}" {{if eq . $.Filter.Tool}}selected{{end}}>{{.}}</option>{{end}}</select>
+      <button class="btn" type="submit">Search</button>
+      {{if .FilterActive}}<a class="clear" href="/?channel={{.Selected}}">Clear</a>{{end}}
+    </form>
+    {{if .FilterActive}}<div class="summary">{{plural .Matched "thread"}} match</div>{{end}}
+    {{if .ChannelArchived}}<div class="arch-note">This channel is archived. It is read-only and hidden from the channel list. Restore it to post again.</div>
+    {{else if .Selected}}
     <form class="composer" method="post" action="/ui/post">
       <input type="hidden" name="channel" value="{{.Selected}}">
       <textarea name="content" id="draft" placeholder="Start a thread in #{{.Selected}} as human..." required></textarea>
@@ -681,8 +792,9 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
         {{end}}
       </article>
       {{else}}
-      <div class="empty">no posts yet</div>
+      <div class="empty">{{if .FilterActive}}nothing matches. Try fewer words or clear the filters.{{else}}no posts yet{{end}}</div>
       {{end}}
+      {{if .MoreCount}}<a class="more-threads" href="{{.MoreURL}}">Load older ({{plural .MoreCount "more thread"}})</a>{{end}}
     </div>
     {{end}}
   </div></div>
