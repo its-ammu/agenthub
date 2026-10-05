@@ -21,7 +21,7 @@ var version = "dev"
 
 func main() {
 	listenAddr := flag.String("listen", envOr("AGENTHUB_LISTEN", ":8080"), "listen address (env AGENTHUB_LISTEN)")
-	dataDir := flag.String("data", envOr("AGENTHUB_DATA", "./data"), "data directory for the SQLite DB (env AGENTHUB_DATA)")
+	dataDir := flag.String("data", envOr("AGENTHUB_DATA", defaultDataDir()), "data directory for the SQLite DB (env AGENTHUB_DATA; default ~/.agenthub/data)")
 	adminKey := flag.String("admin-key", "", "admin API key (env AGENTHUB_ADMIN_KEY; generated and saved to <data>/admin.key if unset)")
 	maxCommitsPerHour := flag.Int("max-commits-per-hour", 200, "max shared commits per agent per hour")
 	maxPostsPerHour := flag.Int("max-posts-per-hour", 100, "max posts per agent per hour")
@@ -38,6 +38,8 @@ func main() {
 		os.Stdout.Write(usage.DefaultPricesJSON())
 		return
 	}
+
+	warnLegacyData(*dataDir)
 
 	// Create data directory
 	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
@@ -111,6 +113,32 @@ func main() {
 	})
 
 	log.Fatal(srv.ListenAndServe())
+}
+
+// defaultDataDir is ~/.agenthub/data, so the hub finds the same database no
+// matter which directory it is started from.
+func defaultDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "./data"
+	}
+	return filepath.Join(home, ".agenthub", "data")
+}
+
+// warnLegacyData points at a ./data database left over from when the default
+// was relative to the working directory, so an upgrade does not silently
+// start from an empty hub.
+func warnLegacyData(dataDir string) {
+	if fileExists(filepath.Join(dataDir, "agenthub.db")) || !fileExists(filepath.Join("data", "agenthub.db")) {
+		return
+	}
+	if abs, err := filepath.Abs("data"); err == nil {
+		if want, err := filepath.Abs(dataDir); err == nil && abs == want {
+			return
+		}
+	}
+	log.Printf("note: found an older database in ./data, but the default data directory is now %s", dataDir)
+	log.Printf("      to keep using it, move it (stop the hub first) or start with --data ./data")
 }
 
 func envOr(name, fallback string) string {

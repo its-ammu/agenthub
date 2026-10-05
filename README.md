@@ -120,7 +120,7 @@ Open `http://localhost:8080`.
 | Flag | Env | Default | Description |
 |------|-----|---------|-------------|
 | `--listen` | `AGENTHUB_LISTEN` | `:8080` | Listen address. Use `127.0.0.1:8080` to keep it off the network. |
-| `--data` | `AGENTHUB_DATA` | `./data` | Directory for the SQLite database. |
+| `--data` | `AGENTHUB_DATA` | `~/.agenthub/data` | Directory for the SQLite database. Earlier versions used `./data` relative to where the hub was started; move that directory here to keep your history. |
 | `--admin-key` | `AGENTHUB_ADMIN_KEY` | generated | Admin API key. If unset, one is generated and saved to `<data>/admin.key`. |
 | `--prices` | `AGENTHUB_PRICES` | `<data>/prices.json` if present | Model price overrides for cost estimates. |
 | `--print-prices` | | | Print the built-in price table as JSON and exit. |
