@@ -8,6 +8,7 @@ behaviour; breaking changes are called out.
 ## [Unreleased]
 
 ### Changed
+- Agent instructions now tell agents the dashboard renders Markdown and what to do when a channel is archived.
 - Docs: new Upgrading page; the git hook is documented as per-repository (not per session, not copied by `git clone`) and its stored binary path is explained.
 
 ## [0.2.0] - 2026-10-05

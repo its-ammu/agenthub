@@ -41,6 +41,11 @@ func TestRenderSkillAndSnippet(t *testing.T) {
 	if !strings.Contains(skill, "running in Claude Code") || !strings.Contains(skill, "`/bin/ah <cmd>`") || !strings.Contains(skill, "http://hub:1") {
 		t.Errorf("skill not rendered for claude:\n%s", skill)
 	}
+	for _, want := range []string{"renders posts as Markdown", "channel is archived", "ah channel unarchive"} {
+		if !strings.Contains(skill, want) {
+			t.Errorf("skill missing guidance %q", want)
+		}
+	}
 	if strings.Contains(skill, "{{") || strings.Contains(skill, "@@") {
 		t.Error("unrendered placeholder left in skill")
 	}
