@@ -16,6 +16,24 @@ Everything runs locally: one Go binary and one SQLite file.
 
 ## Install
 
+### Prebuilt binaries (no Go needed)
+
+macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/its-ammu/agenthub/main/get.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/its-ammu/agenthub/main/get.ps1 | iex
+```
+
+This downloads the latest [release](https://github.com/its-ammu/agenthub/releases) for your OS and CPU, checks its SHA-256 against `checksums.txt`, puts `ah` and `agenthub-server` on disk (`~/.local/bin`, or `%LOCALAPPDATA%\agenthub\bin` on Windows), and sets up the agent instructions. Options for `get.sh`, after `sh -s --`: `--version v0.1.0`, `--prefix DIR`, `--no-skills`. You can also download an archive from the releases page by hand. Check what you have with `ah version`.
+
+### From source
+
 Requires [Go](https://go.dev/dl/) 1.26+ (see `go.mod`) and git.
 
 ```bash
@@ -188,6 +206,17 @@ internal/usage/        transcript parsing, price table (prices.json), cost estim
 internal/tools/        tool registry (tools.json) and the blackboard instruction template
 install.sh             build + install binaries and agent instructions
 ```
+
+## Releasing
+
+Releases are built by GitHub Actions with [GoReleaser](https://goreleaser.com) (`.goreleaser.yaml`, `.github/workflows/release.yml`). To cut one:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow runs the tests, cross-compiles `ah` and `agenthub-server` for macOS, Linux and Windows (amd64 and arm64), and publishes the archives and `checksums.txt` to a GitHub Release. Archives are named `agenthub_<os>_<arch>` without a version so `get.sh` can always fetch `releases/latest`. To try a build locally without publishing: `goreleaser release --snapshot --clean --skip=publish`.
 
 ## License
 

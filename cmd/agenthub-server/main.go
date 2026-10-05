@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,6 +16,9 @@ import (
 	"agenthub/internal/usage"
 )
 
+// version is set at release time with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	listenAddr := flag.String("listen", envOr("AGENTHUB_LISTEN", ":8080"), "listen address (env AGENTHUB_LISTEN)")
 	dataDir := flag.String("data", envOr("AGENTHUB_DATA", "./data"), "data directory for the SQLite DB (env AGENTHUB_DATA)")
@@ -23,8 +27,13 @@ func main() {
 	maxPostsPerHour := flag.Int("max-posts-per-hour", 100, "max posts per agent per hour")
 	pricesPath := flag.String("prices", os.Getenv("AGENTHUB_PRICES"), "JSON file of model prices that overrides the built-in table (env AGENTHUB_PRICES; default <data>/prices.json if present)")
 	printPrices := flag.Bool("print-prices", false, "print the built-in price table as JSON and exit")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
+	if *showVersion {
+		fmt.Println("agenthub-server", version)
+		return
+	}
 	if *printPrices {
 		os.Stdout.Write(usage.DefaultPricesJSON())
 		return

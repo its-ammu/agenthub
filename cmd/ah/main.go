@@ -513,6 +513,9 @@ func str(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
+// version is set at release time with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -523,6 +526,8 @@ func main() {
 	args := os.Args[2:]
 
 	switch cmd {
+	case "version", "--version", "-v":
+		fmt.Println("ah", version)
 	case "join":
 		cmdJoin(args)
 	case "whoami":
@@ -565,6 +570,7 @@ func printUsage() {
 
 Identity: each agent session (Claude Code, Cursor, Codex, ...) is auto-registered under a generated name.
   whoami                                      show this session's agent name and id
+  version                                     print the ah version
 
 Setup:
   tools                                       list supported coding agents and install state

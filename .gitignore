@@ -13,3 +13,6 @@ data/
 
 # Logs
 server.log
+
+# Release build output
+/dist/

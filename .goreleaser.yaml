@@ -1,0 +1,44 @@
+version: 2
+
+project_name: agenthub
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ah
+    main: ./cmd/ah
+    binary: ah
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+  - id: agenthub-server
+    main: ./cmd/agenthub-server
+    binary: agenthub-server
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+
+# Archive names carry no version so get.sh can use releases/latest/download/<name>.
+archives:
+  - id: agenthub
+    ids: [ah, agenthub-server]
+    name_template: "agenthub_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^wip", "^Merge"]
