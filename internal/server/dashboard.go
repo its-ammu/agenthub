@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,24 +29,28 @@ type postView struct {
 type thread struct {
 	Root    postView
 	Replies []postView
+	latest  int // highest post id in the thread; ids grow with time
 }
 
 type dashboardData struct {
-	Stats       *db.Stats
-	Sessions    []db.Agent // session agents, newest first
-	Channels    []db.Channel
-	View        string // "board" or "commits"
-	Selected    string // channel name; "" means all channels
-	Threads     []thread
-	Commits     []db.Commit
-	Error       string
-	Now         time.Time
-	ChannelDesc string
-	PostCount   int
+	Stats        *db.Stats
+	Sessions     []db.Agent // session agents, newest first
+	MoreSessions int        // sessions beyond the first few shown
+	Channels     []db.Channel
+	View         string // "board" or "commits"
+	Selected     string // channel name; "" means all channels
+	Threads      []thread
+	Commits      []db.Commit
+	Error        string
+	Now          time.Time
+	ChannelDesc  string
+	PostCount    int
 }
 
-// buildThreads groups posts into top-level threads (newest first) with all
-// descendant replies flattened beneath each root (oldest first).
+// buildThreads groups posts into top-level threads with all descendant replies
+// flattened beneath each root (oldest first, so a conversation reads top to
+// bottom). Threads are ordered by latest activity, newest first, so a fresh
+// reply moves its thread to the top.
 func buildThreads(posts []db.PostWithChannel, showChannel bool, commits map[int]*db.Commit, tools map[string]string) []thread {
 	byID := make(map[int]db.PostWithChannel, len(posts))
 	for _, p := range posts {
@@ -71,7 +76,7 @@ func buildThreads(posts []db.PostWithChannel, showChannel bool, commits map[int]
 	for _, p := range posts {
 		if p.ParentID == nil {
 			idx[p.ID] = len(threads)
-			threads = append(threads, thread{Root: postView{PostWithChannel: p, ShowChannel: showChannel, Commit: commits[p.ID], Tool: tools[p.AgentID]}})
+			threads = append(threads, thread{latest: p.ID, Root: postView{PostWithChannel: p, ShowChannel: showChannel, Commit: commits[p.ID], Tool: tools[p.AgentID]}})
 		}
 	}
 	// replies oldest first
@@ -91,7 +96,11 @@ func buildThreads(posts []db.PostWithChannel, showChannel bool, commits map[int]
 		t := &threads[idx[root]]
 		t.Replies = append(t.Replies, v)
 		t.Root.ReplyCount++
+		if p.ID > t.latest {
+			t.latest = p.ID
+		}
 	}
+	sort.SliceStable(threads, func(i, j int) bool { return threads[i].latest > threads[j].latest })
 	return threads
 }
 
@@ -119,11 +128,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			a := agents[i]
 			if a.Tool != "" {
 				tools[a.ID] = a.Tool
-				if len(data.Sessions) < 12 {
+				if len(data.Sessions) < 200 {
 					data.Sessions = append(data.Sessions, a)
 				}
 			}
 		}
+	}
+
+	if n := len(data.Sessions) - 5; n > 0 {
+		data.MoreSessions = n
 	}
 
 	if data.View == "commits" {
@@ -411,109 +424,121 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agenthub</title>
+<meta name="color-scheme" content="dark light">
+<script>try { var t = localStorage.getItem('ah-theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
 <style>
-  :root { --bg:#0a0a0a; --panel:#111; --card:#141414; --line:#222; --muted:#666; --text:#e0e0e0; --blue:#7aa2f7; --gold:#f0c674; --red:#e0706b; }
+  :root { color-scheme: dark; --bg:#0a0a0a; --side:#0f0f0f; --card:#141414; --line:#222; --line2:#1d1d1d; --muted:#666; --faint:#555; --nav:#999; --text:#e0e0e0; --strong:#fff; --body:#ccc; --hover:#181818; --blue:#7aa2f7; --blue-bg:#1a1a2e; --gold:#f0c674; --gold-bg:#f0c674; --gold-border:#3a331f; --red:#e0706b; --on-accent:#0a0a0a; --danger-bg:#2a1a1a; --danger-border:#4a2a2a; --banner-bg:#2a1a1a; --banner-border:#5a2a2a; --banner-fg:#e08080; --tag-bg:#1a1a1a; --tag-fg:#999; --agent:#81a2be; --drawer:#101010; --overlay:rgba(0,0,0,.5); --reply-line:#232323; --pre:#aaa; --row-line:#181818; --claude:#d97757; --claude-border:#4a2f24; --cursor-border:#243049; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { color-scheme: light; --bg:#f6f6f2; --side:#ffffff; --card:#ffffff; --line:#e0e0d8; --line2:#e8e8e1; --muted:#6b6b64; --faint:#8a8a82; --nav:#55554f; --text:#1f1f1c; --strong:#111; --body:#33332f; --hover:#efefe9; --blue:#2f5fd0; --blue-bg:#e6edfc; --gold:#936400; --gold-bg:#f0c674; --gold-border:#e6d49a; --red:#c0392b; --on-accent:#14140f; --danger-bg:#fbeaea; --danger-border:#e4b8b8; --banner-bg:#fdecec; --banner-border:#f0b9b9; --banner-fg:#b03a3a; --tag-bg:#eeeee8; --tag-fg:#66665f; --agent:#3b6a96; --drawer:#ffffff; --overlay:rgba(0,0,0,.25); --reply-line:#dcdcd4; --pre:#444; --row-line:#eeeee8; --claude:#c4562f; --claude-border:#f0c9b9; --cursor-border:#bccbef; } }
+  :root[data-theme="light"] { color-scheme: light; --bg:#f6f6f2; --side:#ffffff; --card:#ffffff; --line:#e0e0d8; --line2:#e8e8e1; --muted:#6b6b64; --faint:#8a8a82; --nav:#55554f; --text:#1f1f1c; --strong:#111; --body:#33332f; --hover:#efefe9; --blue:#2f5fd0; --blue-bg:#e6edfc; --gold:#936400; --gold-bg:#f0c674; --gold-border:#e6d49a; --red:#c0392b; --on-accent:#14140f; --danger-bg:#fbeaea; --danger-border:#e4b8b8; --banner-bg:#fdecec; --banner-border:#f0b9b9; --banner-fg:#b03a3a; --tag-bg:#eeeee8; --tag-fg:#66665f; --agent:#3b6a96; --drawer:#ffffff; --overlay:rgba(0,0,0,.25); --reply-line:#dcdcd4; --pre:#444; --row-line:#eeeee8; --claude:#c4562f; --claude-border:#f0c9b9; --cursor-border:#bccbef; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; height: 100vh; display: flex; }
   a { color: inherit; text-decoration: none; }
   button { font: inherit; cursor: pointer; border: 0; border-radius: 5px; }
-  .btn { background: var(--blue); color: #0a0a0a; font-weight: bold; padding: 6px 14px; }
-  .btn.danger { background: transparent; color: var(--red); border: 1px solid #4a2a2a; font-weight: normal; padding: 4px 10px; font-size: 12px; }
-  .btn.danger:hover { background: #2a1a1a; }
+  .btn { background: var(--blue); color: var(--on-accent); font-weight: bold; padding: 6px 14px; }
+  .btn.danger { background: transparent; color: var(--red); border: 1px solid var(--danger-border); font-weight: normal; padding: 4px 10px; font-size: 12px; }
+  .btn.danger:hover { background: var(--danger-bg); }
 
-  .sidebar { width: 240px; flex-shrink: 0; background: #0f0f0f; border-right: 1px solid var(--line); padding: 16px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-  .brand { font-size: 18px; color: #fff; }
-  .counts { color: #555; font-size: 11px; margin-bottom: 18px; }
+  .sidebar { width: 240px; flex-shrink: 0; background: var(--side); border-right: 1px solid var(--line); padding: 16px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .brand { font-size: 18px; color: var(--strong); display: flex; align-items: center; justify-content: space-between; }
+  .theme-toggle { background: none; color: var(--muted); font-size: 16px; padding: 0 4px; line-height: 1; }
+  .theme-toggle:hover { color: var(--blue); }
+  details.more-sessions summary { cursor: pointer; color: var(--faint); font-size: 12px; padding: 4px 8px; list-style: none; }
+  details.more-sessions summary:hover { color: var(--blue); }
+  .counts { color: var(--faint); font-size: 11px; margin-bottom: 18px; }
   .side-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin: 14px 8px 6px; }
-  .nav { display: block; padding: 6px 8px; border-radius: 5px; color: #999; }
-  .nav:hover { background: #181818; color: #fff; }
-  .nav.active { background: #1a1a2e; color: var(--blue); }
+  .nav { display: block; padding: 6px 8px; border-radius: 5px; color: var(--nav); }
+  .nav:hover { background: var(--hover); color: var(--strong); }
+  .nav.active { background: var(--blue-bg); color: var(--blue); }
   .new-chan { margin-top: auto; padding-top: 16px; display: flex; flex-direction: column; gap: 6px; }
   .new-chan input { width: 100%; background: var(--card); border: 1px solid var(--line); color: var(--text); border-radius: 5px; padding: 6px 8px; font: inherit; font-size: 12px; }
   input:focus, textarea:focus { outline: none; border-color: var(--blue); }
 
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar { padding: 14px 28px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 16px; }
-  .topbar h1 { font-size: 16px; color: #fff; }
+  .topbar h1 { font-size: 16px; color: var(--strong); }
   .topbar .desc { color: var(--muted); font-size: 12px; }
   .topbar .spacer { margin-left: auto; }
   .scroll { flex: 1; overflow-y: auto; padding: 20px 28px 40px; }
   .col { max-width: 820px; margin: 0 auto; }
-  .banner { background: #2a1a1a; border: 1px solid #5a2a2a; color: #e08080; border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; font-size: 12px; }
+  .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); color: var(--banner-fg); border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; font-size: 12px; }
 
   .composer { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 22px; }
   textarea { width: 100%; min-height: 64px; resize: vertical; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 5px; padding: 8px; font: inherit; }
   .composer-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; color: var(--muted); }
 
-  .thread { background: var(--card); border: 1px solid #1d1d1d; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
-  .thread.human-thread { border-color: #3a331f; }
+  .thread { background: var(--card); border: 1px solid var(--line2); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .thread.human-thread { border-color: var(--gold-border); }
   .post { display: flex; gap: 12px; }
   .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; color: #0a0a0a; background: hsl(var(--h), 55%, 65%); }
-  .post.human .avatar { background: var(--gold); }
+  .post.human .avatar { background: var(--gold-bg); }
   .body { flex: 1; min-width: 0; }
   .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
-  .who { color: #fff; font-weight: bold; }
+  .who { color: var(--strong); font-weight: bold; }
   .post.human .who { color: var(--gold); }
-  .badge { background: var(--gold); color: #0a0a0a; border-radius: 3px; padding: 0 6px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
-  .channel-tag { background: #1a1a2e; color: var(--blue); padding: 1px 6px; border-radius: 3px; }
-  .to, .time, .pid { color: #555; }
-  .content { margin-top: 4px; color: #ccc; white-space: pre-wrap; word-break: break-word; }
+  .badge { background: var(--gold-bg); color: var(--on-accent); border-radius: 3px; padding: 0 6px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
+  .channel-tag { background: var(--blue-bg); color: var(--blue); padding: 1px 6px; border-radius: 3px; }
+  .to, .time, .pid { color: var(--faint); }
+  .content { margin-top: 4px; color: var(--body); white-space: pre-wrap; word-break: break-word; }
   .row-actions { display: flex; align-items: flex-start; gap: 14px; margin-top: 8px; font-size: 12px; }
   .push { margin-left: auto; }
   .row-actions form.inline { display: inline; }
-  .link-btn { background: none; color: #555; padding: 0; font-size: 12px; }
+  .link-btn { background: none; color: var(--faint); padding: 0; font-size: 12px; }
   .link-btn:hover { color: var(--blue); }
   .link-btn.del:hover { color: var(--red); }
-  details.reply-box summary { list-style: none; cursor: pointer; color: #555; }
+  details.reply-box summary { list-style: none; cursor: pointer; color: var(--faint); }
   details.reply-box summary::-webkit-details-marker { display: none; }
   details.reply-box summary:hover { color: var(--blue); }
   details.reply-box[open] { flex-basis: 100%; }
   details.reply-box form { margin-top: 8px; }
-  .replies { margin: 12px 0 0 16px; padding-left: 20px; border-left: 2px solid #232323; display: flex; flex-direction: column; gap: 14px; }
-  .replies-label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin: 12px 0 -4px 16px; }
+  .replies { margin: 12px 0 0 16px; padding-left: 20px; border-left: 2px solid var(--reply-line); display: flex; flex-direction: column; gap: 14px; }
+  .replies-label { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 1px; margin: 12px 0 -4px 16px; }
   .post.reply .avatar { width: 26px; height: 26px; font-size: 11px; }
   .post.reply.human { border-left: 0; }
-  .empty { color: #444; font-style: italic; padding: 30px 0; text-align: center; }
+  .empty { color: var(--faint); font-style: italic; padding: 30px 0; text-align: center; }
 
   .content + .commit { margin-top: 8px; background: var(--bg); }
-  .commit { background: var(--card); border: 1px solid #1d1d1d; border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; }
+  .commit { background: var(--card); border: 1px solid var(--line2); border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; }
   .c-main { display: flex; gap: 10px; align-items: baseline; }
   .hash { color: var(--gold); }
   a.hash:hover { text-decoration: underline; }
-  .subject { color: #fff; word-break: break-word; }
-  .c-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: #555; margin-top: 4px; }
-  .tag { padding: 1px 6px; border-radius: 3px; background: #1a1a1a; color: #999; }
-  .tag.repo { background: #1a1a2e; color: var(--blue); }
-  .tag.agent { color: #81a2be; }
-  .commit details summary { cursor: pointer; color: #555; font-size: 12px; margin-top: 6px; }
-  .commit pre { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; margin-top: 6px; font: inherit; font-size: 12px; color: #aaa; white-space: pre-wrap; overflow-x: auto; }
+  .subject { color: var(--strong); word-break: break-word; }
+  .c-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--faint); margin-top: 4px; }
+  .tag { padding: 1px 6px; border-radius: 3px; background: var(--tag-bg); color: var(--tag-fg); }
+  .tag.repo { background: var(--blue-bg); color: var(--blue); }
+  .tag.agent { color: var(--agent); }
+  .commit details summary { cursor: pointer; color: var(--faint); font-size: 12px; margin-top: 6px; }
+  .commit pre { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; margin-top: 6px; font: inherit; font-size: 12px; color: var(--pre); white-space: pre-wrap; overflow-x: auto; }
 
   button.agent-link { background: none; border: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
   button.agent-link.who:hover, button.agent-link.plain:hover { text-decoration: underline; }
-  button.agent-link.plain { color: #81a2be; font-size: 12px; }
+  button.agent-link.plain { color: var(--agent); font-size: 12px; }
   button.nav { width: 100%; }
-  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 8px; background: #555; }
-  .dot-claude { background: #d97757; } .dot-cursor { background: #7aa2f7; }
-  .tool { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; padding: 0 6px; border-radius: 3px; border: 1px solid #2a2a2a; color: #888; }
-  .tool-claude { color: #d97757; border-color: #4a2f24; } .tool-cursor { color: var(--blue); border-color: #243049; }
-  .drawer-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; z-index: 10; }
-  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); background: #101010; border-left: 1px solid var(--line); padding: 20px; overflow-y: auto; transform: translateX(100%); transition: transform .15s; z-index: 11; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 8px; background: var(--faint); }
+  .dot-claude { background: var(--claude); } .dot-cursor { background: var(--blue); }
+  .tool { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; padding: 0 6px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted); }
+  .tool-claude { color: var(--claude); border-color: var(--claude-border); } .tool-cursor { color: var(--blue); border-color: var(--cursor-border); }
+  .drawer-bg { position: fixed; inset: 0; background: var(--overlay); display: none; z-index: 10; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); background: var(--drawer); border-left: 1px solid var(--line); padding: 20px; overflow-y: auto; transform: translateX(100%); transition: transform .15s; z-index: 11; }
   body.drawer-open .drawer-bg { display: block; } body.drawer-open .drawer { transform: none; }
-  .drawer h2 { font-size: 17px; color: #fff; display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-  .drawer .close { margin-left: auto; background: none; color: #777; font-size: 20px; line-height: 1; }
+  .drawer h2 { font-size: 17px; color: var(--strong); display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .drawer .close { margin-left: auto; background: none; color: var(--muted); font-size: 20px; line-height: 1; }
   .kv { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; font-size: 12px; margin: 14px 0; }
-  .kv dt { color: var(--muted); } .kv dd { color: #ccc; word-break: break-all; }
+  .kv dt { color: var(--muted); } .kv dd { color: var(--body); word-break: break-all; }
   .sid { display: flex; gap: 8px; align-items: center; }
   .sid code { word-break: break-all; color: var(--gold); }
-  .mini { background: #1a1a1a; color: #aaa; padding: 2px 8px; font-size: 11px; border-radius: 4px; }
+  .mini { background: var(--tag-bg); color: var(--tag-fg); padding: 2px 8px; font-size: 11px; border-radius: 4px; }
   .cost { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 14px 0; }
-  .cost .big { font-size: 26px; color: #fff; font-weight: bold; }
+  .cost .big { font-size: 26px; color: var(--strong); font-weight: bold; }
   .cost .sub { color: var(--muted); font-size: 11px; }
   table.usage { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
   table.usage th { text-align: right; color: var(--muted); font-weight: normal; padding: 4px 6px; border-bottom: 1px solid var(--line); }
-  table.usage td { text-align: right; padding: 4px 6px; color: #ccc; border-bottom: 1px solid #181818; }
+  table.usage td { text-align: right; padding: 4px 6px; color: var(--body); border-bottom: 1px solid var(--row-line); }
   table.usage th:first-child, table.usage td:first-child { text-align: left; }
-  .notes { color: #666; font-size: 11px; margin-top: 12px; }
+  .timeline-wrap { margin-top: 10px; }
+  svg.timeline { width: 100%; height: 64px; display: block; }
+  svg.timeline rect { fill: var(--blue); opacity: .85; }
+  svg.timeline rect:hover { opacity: 1; }
+  .notes { color: var(--muted); font-size: 11px; margin-top: 12px; }
   .notes p { margin-bottom: 6px; }
   @media (max-width: 700px) { body { flex-direction: column; height: auto; } .sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); } .scroll { padding: 16px; } }
 </style>
@@ -585,7 +610,7 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
 {{end}}
 
 <nav class="sidebar" id="sidebar">
-  <div class="brand">agenthub</div>
+  <div class="brand">agenthub <button type="button" class="theme-toggle" data-theme-toggle title="Toggle light / dark mode" aria-label="Toggle light or dark mode">&#9680;</button></div>
   <div class="counts">{{.Stats.AgentCount}} agents &middot; {{.Stats.PostCount}} posts &middot; {{.Stats.CommitCount}} commits</div>
   <div class="side-label">Views</div>
   <a class="nav {{if eq .View "commits"}}active{{end}}" href="/?view=commits">&#9099; Commits</a>
@@ -595,7 +620,13 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
   {{end}}
   {{if .Sessions}}
   <div class="side-label">Sessions</div>
-  {{range .Sessions}}<button type="button" class="nav agent-link" data-agent="{{.ID}}"><span class="dot dot-{{.Tool}}"></span>{{.ID}}</button>
+  {{range $i, $s := .Sessions}}{{if lt $i 5}}<button type="button" class="nav agent-link" data-agent="{{$s.ID}}"><span class="dot dot-{{$s.Tool}}"></span>{{$s.ID}}</button>
+  {{end}}{{end}}
+  {{if gt .MoreSessions 0}}
+  <details class="more-sessions"><summary>more ({{.MoreSessions}})</summary>
+    {{range $i, $s := .Sessions}}{{if ge $i 5}}<button type="button" class="nav agent-link" data-agent="{{$s.ID}}"><span class="dot dot-{{$s.Tool}}"></span>{{$s.ID}}</button>
+    {{end}}{{end}}
+  </details>
   {{end}}
   {{end}}
   <form class="new-chan" method="post" action="/ui/channel">
@@ -677,6 +708,28 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
       drawer.replaceChildren(el('p', 'notes', 'Could not load ' + name + ': ' + e.message));
     });
   }
+  // Cost-over-time bar chart. Bars are per bucket; the tooltip shows the running total.
+  function timeline(buckets, minutes) {
+    var NS = 'http://www.w3.org/2000/svg', W = 360, H = 64, max = 0, run = 0;
+    buckets.forEach(function (b) { if (b.cost_usd > max) max = b.cost_usd; });
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.setAttribute('class', 'timeline'); svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Estimated cost over time');
+    var bw = W / buckets.length;
+    buckets.forEach(function (b, i) {
+      run += b.cost_usd;
+      var h = max ? Math.max(b.cost_usd > 0 ? 2 : 0, (b.cost_usd / max) * (H - 4)) : 0;
+      var r = document.createElementNS(NS, 'rect');
+      r.setAttribute('x', i * bw + 1); r.setAttribute('width', Math.max(1, bw - 2));
+      r.setAttribute('y', H - h); r.setAttribute('height', h); r.setAttribute('rx', 1);
+      var t = document.createElementNS(NS, 'title');
+      t.textContent = when(b.start) + ': ' + money(b.cost_usd) + ' (' + b.turns + ' turns), running total ' + money(run);
+      r.appendChild(t); svg.appendChild(r);
+    });
+    var wrap = el('div', 'timeline-wrap'); wrap.appendChild(svg);
+    wrap.appendChild(el('div', 'sub', 'cost per ' + (minutes >= 60 ? (minutes / 60) + 'h' : minutes + 'min') + ' \u00b7 hover a bar for the running total'));
+    return wrap;
+  }
   function renderDrawer(d) {
     var h = el('h2', '', d.name);
     if (d.tool) h.appendChild(el('span', 'tool tool-' + d.tool, d.tool));
@@ -703,6 +756,13 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
         var box = el('div', 'cost');
         box.appendChild(el('div', 'big', u.cost_known ? money(u.total_cost_usd) : 'n/a'));
         box.appendChild(el('div', 'sub', 'estimated cost \u00b7 ' + fmt(u.turns) + ' model turns'));
+        if (u.subagent_turns || u.fast_turns) {
+          var parts = [];
+          if (u.subagent_turns) parts.push('main ' + money(u.main_cost_usd || 0) + ' \u00b7 subagents ' + money(u.subagent_cost_usd || 0) + ' (' + fmt(u.subagent_turns) + ' turns)');
+          if (u.fast_turns) parts.push(fmt(u.fast_turns) + ' fast-mode turns');
+          box.appendChild(el('div', 'sub', parts.join(' \u00b7 ')));
+        }
+        if (u.timeline && u.timeline.length > 1) box.appendChild(timeline(u.timeline, u.bucket_minutes));
         if (u.models && u.models.length) {
           var t = el('table', 'usage'), hr = el('tr');
           ['Model', 'In', 'Out', 'Cache rd', 'Cache wr', 'Cost'].forEach(function (c) { hr.appendChild(el('th', '', c)); });
@@ -735,6 +795,14 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
     if (e.target.id === 'drawer-bg') closeDrawer();
   });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });
+  document.addEventListener('click', function (e) {
+    if (!(e.target.closest && e.target.closest('[data-theme-toggle]'))) return;
+    var root = document.documentElement;
+    var cur = root.getAttribute('data-theme') || (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    var next = cur === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('ah-theme', next); } catch (err) {}
+  });
 
   document.addEventListener('submit', function (e) {
     var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
@@ -746,7 +814,7 @@ var dashboardTmpl = template.Must(template.New("dashboard").Funcs(funcMap).Parse
   // Refresh content every 10s unless the user is typing or has a reply box open.
   setInterval(function () {
     var busy = Array.prototype.some.call(document.querySelectorAll('textarea'), function (t) { return t.value; }) ||
-               document.querySelector('details.reply-box[open]');
+               document.querySelector('details.reply-box[open], details.more-sessions[open]');
     if (busy) return;
     fetch(location.href).then(function (r) { return r.text(); }).then(function (t) {
       var d = new DOMParser().parseFromString(t, 'text/html');

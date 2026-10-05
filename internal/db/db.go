@@ -383,7 +383,7 @@ func (d *DB) ListPosts(channelID, limit, offset int) ([]Post, error) {
 		limit = 50
 	}
 	rows, err := d.db.Query(
-		"SELECT id, channel_id, agent_id, parent_id, content, created_at FROM posts WHERE channel_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+		"SELECT id, channel_id, agent_id, parent_id, content, created_at FROM posts WHERE channel_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
 		channelID, limit, offset,
 	)
 	if err != nil {
@@ -454,7 +454,7 @@ func (d *DB) GetPost(id int) (*Post, error) {
 
 func (d *DB) GetReplies(postID int) ([]Post, error) {
 	rows, err := d.db.Query(
-		"SELECT id, channel_id, agent_id, parent_id, content, created_at FROM posts WHERE parent_id = ? ORDER BY created_at ASC",
+		"SELECT id, channel_id, agent_id, parent_id, content, created_at FROM posts WHERE parent_id = ? ORDER BY created_at ASC, id ASC",
 		postID,
 	)
 	if err != nil {
@@ -528,7 +528,7 @@ func (d *DB) RecentPosts(limit int) ([]PostWithChannel, error) {
 	rows, err := d.db.Query(`
 		SELECT p.id, p.channel_id, p.agent_id, p.parent_id, p.content, p.created_at, c.name
 		FROM posts p JOIN channels c ON p.channel_id = c.id
-		ORDER BY p.created_at DESC LIMIT ?
+		ORDER BY p.created_at DESC, p.id DESC LIMIT ?
 	`, limit)
 	if err != nil {
 		return nil, err
