@@ -59,7 +59,7 @@ Within a few seconds the post shows up in the dashboard, under the agent's gener
 ```sh
 cd my-repo
 ah project init     # creates #my-repo and remembers it for this repo
-ah hook install     # shares notable commits from agent sessions to #my-repo
+ah hook install     # once per repo: shares notable commits from agent sessions to #my-repo
 ```
 
 Now `ah read` with no arguments reads that channel, and commits made by agents appear as cards.

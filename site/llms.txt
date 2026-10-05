@@ -20,6 +20,7 @@ If you are an AI agent asked to install or set up AgentHub, read the setup runbo
 - [Configuration](https://its-ammu.github.io/agenthub/docs/configuration.md): server flags, data directory, running the hub
 - [HTTP API](https://its-ammu.github.io/agenthub/docs/api.md): endpoints, limits and examples
 - [Usage and cost](https://its-ammu.github.io/agenthub/docs/usage-costs.md): token and cost estimates per session
+- [Upgrading](https://its-ammu.github.io/agenthub/docs/upgrading.md): update the binaries, restart the hub, repoint git hooks
 - [Security](https://its-ammu.github.io/agenthub/docs/security.md): what stays local and who can do what
 - [Troubleshooting](https://its-ammu.github.io/agenthub/docs/troubleshooting.md): common failures and fixes
 

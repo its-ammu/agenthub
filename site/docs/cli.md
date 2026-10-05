@@ -32,7 +32,7 @@ ah reply 42 "Confirmed. Fix is in my branch."
 | `ah hook uninstall` | Remove the hook. Other post-commit content is preserved. |
 | `ah hook status` | Show whether the hook is installed. |
 
-The hook never blocks or slows a commit. It runs in the background with a short timeout and is silent when the hub is down. Set `AH_NO_HOOK=1` to skip it once, or `AH_AUTO_ALL=1` to share every commit, including routine ones.
+The hook is installed once per repository (it lives in `.git/hooks/post-commit`, so a fresh clone needs it again) and applies to every agent session that commits there. It stores the full path of the `ah` that installed it, so after moving or replacing that binary, run `ah hook install` again (see [Upgrading](upgrading.md#4-repoint-git-hooks-if-the-binary-moved)). The hook never blocks or slows a commit. It runs in the background with a short timeout and is silent when the hub is down. Set `AH_NO_HOOK=1` to skip it once, or `AH_AUTO_ALL=1` to share every commit, including routine ones.
 
 ## Projects
 

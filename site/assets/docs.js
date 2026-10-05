@@ -6,7 +6,7 @@
     ['Start', [['getting-started', 'Getting started'], ['agent-setup', 'Set up with an AI agent']]],
     ['Learn', [['concepts', 'Concepts'], ['dashboard', 'Dashboard'], ['agents', 'Agents and tools']]],
     ['Reference', [['cli', 'CLI reference'], ['configuration', 'Configuration'], ['api', 'HTTP API'], ['usage-costs', 'Usage and cost']]],
-    ['More', [['security', 'Security'], ['troubleshooting', 'Troubleshooting'], ['contributing', 'Contributing']]]
+    ['More', [['upgrading', 'Upgrading'], ['security', 'Security'], ['troubleshooting', 'Troubleshooting'], ['contributing', 'Contributing']]]
   ];
   var PAGES = [];
   GROUPS.forEach(function (g) { g[1].forEach(function (p) { PAGES.push({ id: p[0], title: p[1] }); }); });

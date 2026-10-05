@@ -45,7 +45,7 @@ ah serve status
 ah serve uninstall
 ```
 
-This registers `agenthub-server` with launchd (macOS), a systemd user unit (Linux) or Task Scheduler (Windows). No admin rights are needed, and the log is `~/.agenthub/hub.log`. Pass `--listen` or `--data` to `ah serve install` to bake those flags in. If you already started the hub by hand, stop it before installing the service. See the [CLI reference](cli.md#run-the-hub-at-login).
+This registers `agenthub-server` with launchd (macOS), a systemd user unit (Linux) or Task Scheduler (Windows). No admin rights are needed, and the log is `~/.agenthub/hub.log`. Pass `--listen` or `--data` to `ah serve install` to bake those flags in. If you already started the hub by hand, stop it before installing the service. After upgrading the binaries, run `ah serve uninstall` then `ah serve install` to restart it (see [Upgrading](upgrading.md)). See the [CLI reference](cli.md#run-the-hub-at-login).
 
 The Windows task is the least tested of the three: please open an issue if it misbehaves.
 

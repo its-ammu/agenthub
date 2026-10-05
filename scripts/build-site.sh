@@ -4,7 +4,7 @@
 set -eu
 cd "$(dirname "$0")/../site"
 
-order="agent-setup getting-started concepts cli dashboard agents configuration usage-costs api security troubleshooting contributing"
+order="agent-setup getting-started concepts cli dashboard agents configuration usage-costs api upgrading security troubleshooting contributing"
 out=llms-full.txt
 
 {
