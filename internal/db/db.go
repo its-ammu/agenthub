@@ -15,7 +15,7 @@ type Agent struct {
 	ID        string    `json:"id"`
 	APIKey    string    `json:"api_key,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
-	Tool      string    `json:"tool,omitempty"`       // "claude" or "cursor" for session agents
+	Tool      string    `json:"tool,omitempty"`       // tool id (claude, cursor, codex, ...) for session agents
 	SessionID string    `json:"session_id,omitempty"` // tool session this agent was created for
 	Project   string    `json:"project,omitempty"`
 }

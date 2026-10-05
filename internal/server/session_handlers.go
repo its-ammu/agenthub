@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"agenthub/internal/names"
+	"agenthub/internal/tools"
 	"agenthub/internal/usage"
 )
 
@@ -28,8 +29,8 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if req.Tool != "claude" && req.Tool != "cursor" {
-		writeError(w, http.StatusBadRequest, "tool must be claude or cursor")
+	if !tools.IDRe.MatchString(req.Tool) {
+		writeError(w, http.StatusBadRequest, "tool must be a short lowercase id, e.g. claude, cursor, codex")
 		return
 	}
 	if !sessionIDRe.MatchString(req.SessionID) {
@@ -119,12 +120,7 @@ func (s *Server) handleUISession(w http.ResponseWriter, r *http.Request) {
 		"commits":    commits,
 	}
 	if a.SessionID != "" {
-		switch a.Tool {
-		case "claude":
-			out["usage"] = usage.Claude(a.SessionID)
-		case "cursor":
-			out["usage"] = usage.Cursor(a.SessionID)
-		}
+		out["usage"] = usage.For(a.Tool, a.SessionID)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

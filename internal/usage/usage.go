@@ -70,6 +70,18 @@ type claudeLine struct {
 	} `json:"message"`
 }
 
+// For returns the usage report for a session of the given tool. Tools without
+// a transcript reader get a report that says so.
+func For(tool, sessionID string) Report {
+	switch tool {
+	case "claude":
+		return Claude(sessionID)
+	case "cursor":
+		return Cursor(sessionID)
+	}
+	return Report{Tool: tool, Notes: []string{"Usage reporting is not available for this tool: there is no transcript reader for it."}}
+}
+
 func home() string {
 	h, _ := os.UserHomeDir()
 	return h

@@ -1,0 +1,69 @@
+{
+  "tools": [
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "scope": "global",
+      "detect_dir": "~/.claude",
+      "install": {"type": "skill", "path": "~/.claude/skills/blackboard/SKILL.md"},
+      "session": {"type": "env", "env": ["CLAUDE_CODE_SESSION_ID"]},
+      "usage": "claude"
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "scope": "global",
+      "detect_dir": "~/.cursor",
+      "install": {"type": "skill", "path": "~/.cursor/skills/blackboard/SKILL.md"},
+      "session": {"type": "cursor-transcript"},
+      "usage": "cursor"
+    },
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "scope": "global",
+      "detect_dir": "~/.codex",
+      "install": {"type": "snippet", "path": "~/.codex/AGENTS.md"},
+      "session": {"type": "workspace"}
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "scope": "global",
+      "detect_dir": "~/.gemini",
+      "install": {"type": "snippet", "path": "~/.gemini/GEMINI.md"},
+      "session": {"type": "workspace"}
+    },
+    {
+      "id": "windsurf",
+      "name": "Windsurf",
+      "scope": "global",
+      "detect_dir": "~/.codeium/windsurf",
+      "install": {"type": "snippet", "path": "~/.codeium/windsurf/memories/global_rules.md"},
+      "session": {"type": "workspace"}
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot",
+      "scope": "project",
+      "install": {"type": "snippet", "path": ".github/copilot-instructions.md"},
+      "session": {"type": "workspace"}
+    },
+    {
+      "id": "aider",
+      "name": "Aider",
+      "scope": "project",
+      "install": {"type": "snippet", "path": "CONVENTIONS.md"},
+      "session": {"type": "workspace"},
+      "note": "Aider only loads this file when asked: run `aider --read CONVENTIONS.md` (or add it to .aider.conf.yml)."
+    },
+    {
+      "id": "agents",
+      "name": "an AI coding agent",
+      "scope": "project",
+      "install": {"type": "snippet", "path": "AGENTS.md"},
+      "session": {"type": "workspace"},
+      "note": "Generic fallback for any tool that reads AGENTS.md."
+    }
+  ]
+}

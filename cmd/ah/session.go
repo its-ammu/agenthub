@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,9 +10,11 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"agenthub/internal/tools"
 )
 
-// Session identity: each Claude Code or Cursor session gets its own hub agent,
+// Session identity: each tool session (Claude Code, Cursor, Codex, ...) gets its own hub agent,
 // named after the session id. Credentials live in ~/.agenthub/sessions/<id>.json.
 
 // Server URL precedence: AH_SERVER env, ~/.agenthub/server, legacy config, then the default.
@@ -23,25 +27,69 @@ type sessionInfo struct {
 }
 
 // detectSession finds the current tool session, or returns false if it can't.
-// Override with AH_TOOL and AH_SESSION_ID.
+//
+// Contract for any tool: set AH_SESSION_ID (and AH_TOOL, a short lowercase id
+// like "mytool") and `ah` registers that session as its own agent. Without
+// AH_SESSION_ID, each tool in the registry (internal/tools/tools.json) says how
+// to find its session: an env var, Cursor's transcript directory, or, for tools
+// that expose nothing, one session per workspace per day. If AH_TOOL is set,
+// only that tool's detector is tried.
 func detectSession() (sessionInfo, bool) {
 	cwd, _ := os.Getwd()
 	project := filepath.Base(cwd)
+	want := os.Getenv("AH_TOOL")
 
 	if sid := os.Getenv("AH_SESSION_ID"); sid != "" {
-		tool := os.Getenv("AH_TOOL")
-		if tool == "" {
-			tool = "cursor"
+		if want == "" {
+			want = "agent"
 		}
-		return sessionInfo{tool, sid, project}, true
+		return sessionInfo{want, sid, project}, true
 	}
-	if sid := os.Getenv("CLAUDE_CODE_SESSION_ID"); sid != "" && os.Getenv("AH_TOOL") != "cursor" {
-		return sessionInfo{"claude", sid, project}, true
+
+	list, err := tools.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
-	if sid, proj := cursorSession(cwd); sid != "" {
-		return sessionInfo{"cursor", sid, proj}, true
+	if want != "" {
+		if t, ok := tools.Find(list, want); ok {
+			return detectTool(t, cwd, project)
+		}
+		return sessionInfo{}, false
+	}
+	for _, t := range list {
+		if t.Session.Type == "workspace" {
+			continue // only used when the tool is named via AH_TOOL
+		}
+		if s, ok := detectTool(t, cwd, project); ok {
+			return s, true
+		}
 	}
 	return sessionInfo{}, false
+}
+
+func detectTool(t tools.Tool, cwd, project string) (sessionInfo, bool) {
+	switch t.Session.Type {
+	case "env":
+		for _, name := range t.Session.Env {
+			if sid := os.Getenv(name); sid != "" {
+				return sessionInfo{t.ID, sid, project}, true
+			}
+		}
+	case "cursor-transcript":
+		if sid, proj := cursorSession(cwd); sid != "" {
+			return sessionInfo{t.ID, sid, proj}, true
+		}
+	case "workspace":
+		return sessionInfo{t.ID, workspaceSessionID(t.ID, cwd, time.Now()), project}, true
+	}
+	return sessionInfo{}, false
+}
+
+// workspaceSessionID is a stable id for tools that expose no session id: one
+// per tool, directory and day.
+func workspaceSessionID(tool, dir string, now time.Time) string {
+	sum := sha1.Sum([]byte(dir))
+	return fmt.Sprintf("%s-%s-%s", tool, hex.EncodeToString(sum[:])[:8], now.Format("20060102"))
 }
 
 var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)

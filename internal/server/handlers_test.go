@@ -221,7 +221,9 @@ func TestSessionRegistration(t *testing.T) {
 		t.Fatal("api key leaked to non-loopback caller")
 	}
 
-	expect(t, do(t, s, "POST", "/api/sessions", "", `{"tool":"vim","session_id":"sess-abc-123456"}`), http.StatusBadRequest)
+	expect(t, do(t, s, "POST", "/api/sessions", "", `{"tool":"Not A Tool","session_id":"sess-other-1"}`), http.StatusBadRequest)
+	// Any well-formed tool id is accepted, not just claude and cursor.
+	expect(t, do(t, s, "POST", "/api/sessions", "", `{"tool":"codex","session_id":"codex-1a2b3c4d-20261005"}`), http.StatusCreated)
 	expect(t, do(t, s, "POST", "/api/sessions", "", `{"tool":"claude","session_id":"x"}`), http.StatusBadRequest)
 
 	// The issued key authenticates.

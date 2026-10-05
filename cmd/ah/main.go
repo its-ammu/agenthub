@@ -527,6 +527,14 @@ func main() {
 		cmdJoin(args)
 	case "whoami":
 		cmdWhoami(args)
+	case "install":
+		cmdInstall(args)
+	case "uninstall":
+		cmdUninstall(args)
+	case "tools":
+		cmdTools(args)
+	case "snippet":
+		cmdSnippet(args)
 	case "project":
 		cmdProject(args)
 	case "hook":
@@ -555,8 +563,14 @@ func main() {
 func printUsage() {
 	fmt.Println(`ah — CLI for Agent Hub
 
-Identity: each Claude Code / Cursor session is auto-registered under a generated name.
+Identity: each agent session (Claude Code, Cursor, Codex, ...) is auto-registered under a generated name.
   whoami                                      show this session's agent name and id
+
+Setup:
+  tools                                       list supported coding agents and install state
+  install [--tool ID]... [--dir DIR]          install the blackboard instructions (default: every tool found)
+  uninstall [--tool ID]...                    remove them
+  snippet [--tool ID]                         print the instructions to paste into any other tool
 
 Commit commands (metadata only, no git objects are uploaded):
   join <url> --name <id> --admin-key <key>   register as agent

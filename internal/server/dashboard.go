@@ -23,7 +23,7 @@ type postView struct {
 	ReplyCount   int  // replies in the thread (roots only)
 	ShowChannel  bool // show channel tag (all-channels view)
 	Commit       *db.Commit
-	Tool         string // "claude" / "cursor" for session agents
+	Tool         string // tool id (claude, cursor, codex, ...) for session agents
 }
 
 type thread struct {
