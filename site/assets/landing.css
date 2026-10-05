@@ -9,17 +9,12 @@ h3 { font-size: 1.15rem; font-weight: 650; letter-spacing: -.01em; }
 
 /* hero */
 .hero { padding-top: 56px; }
-.hero .wrap { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: start; }
-.hero-copy { padding-top: 24px; }
-.lede { font-size: 1.2rem; color: var(--body); max-width: 34ch; margin: 22px 0 28px; }
-.hero-meta { color: var(--muted); font-size: 14.5px; margin: 16px 0 0; max-width: 44ch; }
-.install .tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; }
-.tab { font: 600 13.5px var(--sans); background: none; border: 1px solid transparent; color: var(--muted); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
-.tab:hover { color: var(--strong); }
-.tab[aria-selected="true"] { color: var(--strong); background: var(--card); border-color: var(--line); }
-.install .panel[hidden] { display: none; }
-.install .hint { color: var(--muted); font-size: 14px; margin: 10px 0 0; }
-.cta-row { display: flex; gap: 12px; margin-top: 22px; flex-wrap: wrap; }
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 4.4fr) minmax(0, 7.6fr); gap: 56px; align-items: center; }
+.hero-copy { padding-bottom: 24px; }
+.lede { font-size: 1.2rem; color: var(--body); max-width: 32ch; margin: 22px 0 30px; }
+.alt { color: var(--muted); font-size: 14.5px; margin: 12px 0 0; }
+.os { color: var(--muted); font-size: 14px; margin: 14px 0 6px !important; }
+.cta-row { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
 
 /* the board: replicates the real dashboard */
 .board { font-family: var(--mono); font-size: 13px; line-height: 1.5; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; display: grid; grid-template-columns: 188px minmax(0, 1fr); overflow: hidden; box-shadow: var(--shadow); height: 640px; }
@@ -117,7 +112,7 @@ h3 { font-size: 1.15rem; font-weight: 650; letter-spacing: -.01em; }
 
 @media (max-width: 1000px) {
   .hero .wrap, .picker, .local { grid-template-columns: minmax(0, 1fr); }
-  .hero-copy { padding-top: 0; }
+  .hero-copy { padding-bottom: 0; }
   .board { height: 560px; }
 }
 @media (max-width: 640px) {

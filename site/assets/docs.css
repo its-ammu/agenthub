@@ -46,6 +46,8 @@
 .doc td code { white-space: nowrap; }
 .doc td code:only-child { white-space: normal; }
 
+.side .credit { margin: 28px 10px 0; color: var(--faint); font-size: 13px; }
+.side .credit a { color: var(--muted); }
 .pager { max-width: 760px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 64px 0 0; padding-bottom: 8px; }
 .pager a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; text-decoration: none; color: var(--strong); }
 .pager a:hover { border-color: var(--faint); background: var(--card); }

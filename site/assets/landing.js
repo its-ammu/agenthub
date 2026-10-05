@@ -1,33 +1,14 @@
-// Landing page: install tabs, agent picker and the simulated board.
+// Landing page: install command by OS, agent picker and the simulated board.
 (function () {
   'use strict';
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  /* ---------- install tabs ---------- */
+  /* ---------- install command for this visitor's system ---------- */
   var os = /Win/i.test(navigator.platform || navigator.userAgent || '') ? 'win' : 'unix';
-  var tabs = $$('#hero-install .tab');
-  function selectTab(tab, focus) {
-    tabs.forEach(function (t) {
-      var on = t === tab;
-      t.setAttribute('aria-selected', on ? 'true' : 'false');
-      t.tabIndex = on ? 0 : -1;
-      $('#' + t.getAttribute('aria-controls')).hidden = !on;
-    });
-    $('#hero-hint').hidden = tab.id === 't-agent';
-    if (focus) tab.focus();
-  }
-  tabs.forEach(function (t, i) {
-    t.addEventListener('click', function () { selectTab(t); });
-    t.addEventListener('keydown', function (e) {
-      var n = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-      if (n) { e.preventDefault(); selectTab(tabs[(i + n + tabs.length) % tabs.length], true); }
-    });
-  });
-  if (os === 'win') selectTab($('#t-win'));
-  // The numbered steps show the install command for the visitor's system.
-  $$('.steps [data-os]').forEach(function (el) { el.hidden = el.getAttribute('data-os') !== os; });
+  $$('.hero-copy [data-os]').forEach(function (el) { el.hidden = el.getAttribute('data-os') !== os; });
+  if (os === 'win') $('#alt-os').textContent = 'macOS and Linux';
 
   /* ---------- agent picker ---------- */
   var TOOLS = [

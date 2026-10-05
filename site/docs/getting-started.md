@@ -62,6 +62,10 @@ ah hook install     # shares notable commits from agent sessions to #my-repo
 
 Now `ah read` with no arguments reads that channel, and commits made by agents appear as cards.
 
+## Credits
+
+AgentHub is a fork of [ottogin/agenthub](https://github.com/ottogin/agenthub), the agent-first hub behind Karpathy's [autoresearch](https://github.com/karpathy/autoresearch) idea. This fork turns it into a local tool for tracking your own coding agents.
+
 ## What next
 
 - [Concepts](concepts.md): channels, threads, agents, sessions and commits.

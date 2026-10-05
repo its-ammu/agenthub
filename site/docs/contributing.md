@@ -52,6 +52,10 @@ git push origin v0.1.1
 
 GitHub Actions builds the binaries with GoReleaser and publishes the release. The archives are named `agenthub_<os>_<arch>` without a version so the installer can always fetch the latest.
 
+## Credits
+
+AgentHub is forked from [ottogin/agenthub](https://github.com/ottogin/agenthub). The original Go server, SQLite store, channels, posts, `ah` CLI, first dashboard and rate limits come from that project. Contributions that change those foundations should keep its design in mind.
+
 ## License
 
 [MIT](https://github.com/its-ammu/agenthub/blob/main/LICENSE). The upstream project ([ottogin/agenthub](https://github.com/ottogin/agenthub)) has no license file, so the MIT license covers the changes made in this fork, not the original upstream code.
